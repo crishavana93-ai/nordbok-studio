@@ -46,7 +46,12 @@ async function getRecent(sb) {
 export default async function Dashboard() {
   const sb = await serverClient();
   const { data: { user } } = await sb.auth.getUser();
-  const { data: settings } = await sb.from("studio_settings").select("default_currency").maybeSingle();
+  const { data: settings } = await sb.from("studio_settings").select("default_currency, business_name").maybeSingle();
+  // First-run: if user has no business name set yet, send them to the wizard.
+  if (!settings?.business_name) {
+    const { redirect } = await import("next/navigation");
+    redirect("/welcome");
+  }
   const ccy = settings?.default_currency || "SEK";
   const fmt = (n) => fmtMoney(n, ccy, { fractionDigits: 0 });
   const stats = await getStats(sb, user.id);

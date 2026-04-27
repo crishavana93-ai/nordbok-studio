@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { browserClient } from "@/lib/supabase";
 import { validPersonnummer, validOrgNr, buildVatNumber } from "@/lib/swedish-tax";
 import { CURRENCIES } from "@/lib/currency";
+import Tip from "@/components/Tip";
 
 export default function SettingsPage() {
   const sb = useMemo(() => browserClient(), []);
@@ -57,10 +58,10 @@ export default function SettingsPage() {
           <div className="grid-2">
             <div className="field"><label className="label">Företagsnamn *</label><input className="input" required value={s.business_name || ""} onChange={(e) => setS({ ...s, business_name: e.target.value })} placeholder="ditt företag, t.ex. Hopkins Method EF" /></div>
             <div className="field"><label className="label">E-post (faktureringsfrågor)</label><input className="input" value={s.contact_email || user?.email || ""} onChange={(e) => setS({ ...s, contact_email: e.target.value })} /></div>
-            <div className="field"><label className="label">Personnummer (YYYYMMDDXXXX)</label><input className="input" value={s.personnummer || ""} onChange={(e) => setS({ ...s, personnummer: e.target.value })} /></div>
-            <div className="field"><label className="label">Organisationsnummer (frivilligt)</label><input className="input" value={s.org_nr || ""} onChange={(e) => setS({ ...s, org_nr: e.target.value })} /></div>
-            <div className="field"><label className="label">Momsregistreringsnummer</label><input className="input" value={s.vat_number || ""} onChange={(e) => setS({ ...s, vat_number: e.target.value })} placeholder="lämna tomt — fylls i automatiskt" /></div>
-            <div className="field"><label className="label">F-skatt godkänd?</label>
+            <div className="field"><label className="label">Personnummer (YYYYMMDDXXXX) <Tip text="Din skatteidentitet som enskild näringsidkare. Visas på fakturor så kunden kan betala dig korrekt. Format: 12 siffror utan bindestreck (eller med — bägge funkar)." /></label><input className="input" value={s.personnummer || ""} onChange={(e) => setS({ ...s, personnummer: e.target.value })} /></div>
+            <div className="field"><label className="label">Organisationsnummer (frivilligt) <Tip text="Frivilligt för enskild firma — du kan ansöka via Bolagsverket om du vill ha ett separat orgnr istället för att använda personnummer på fakturor. 10 siffror." /></label><input className="input" value={s.org_nr || ""} onChange={(e) => setS({ ...s, org_nr: e.target.value })} /></div>
+            <div className="field"><label className="label">Momsregistreringsnummer <Tip text="'SE' + ditt personnummer (10 siffror) + '01'. Krävs på fakturor om du är momsregistrerad. Lämna tomt — appen bygger det åt dig från personnumret." /></label><input className="input" value={s.vat_number || ""} onChange={(e) => setS({ ...s, vat_number: e.target.value })} placeholder="lämna tomt — fylls i automatiskt" /></div>
+            <div className="field"><label className="label">F-skatt godkänd? <Tip text="F-skatt = företagsskatt. Ett godkännande från Skatteverket som visar att du själv betalar in din skatt. Utan F-skatt-stämpel måste din kund hålla inne 30% i preliminärskatt. Ansök på skatteverket.se." /></label>
               <select className="select" value={s.f_skatt_approved ? "1" : "0"} onChange={(e) => setS({ ...s, f_skatt_approved: e.target.value === "1" })}>
                 <option value="1">Ja — visa "Godkänd för F-skatt" på fakturor</option>
                 <option value="0">Nej</option>
