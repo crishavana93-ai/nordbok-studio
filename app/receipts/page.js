@@ -149,22 +149,24 @@ export default function ReceiptsPage() {
         {loading ? <div className="empty">Laddar...</div> : list.length === 0 ? (
           <div className="empty">Inga kvitton ännu — scanna ditt första.</div>
         ) : (
-          <table className="table">
-            <thead><tr><th>Datum</th><th>Leverantör</th><th>Kategori</th><th>BAS</th><th className="num">Moms</th><th className="num">Total</th><th>Status</th></tr></thead>
-            <tbody>
-              {list.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.receipt_date}</td>
-                  <td>{r.vendor}</td>
-                  <td className="muted">{r.category}</td>
-                  <td className="muted">{r.bas_account}</td>
-                  <td className="num">{fmt(r.vat_amount)}</td>
-                  <td className="num">{fmt(r.total)} kr</td>
-                  <td><span className={`badge badge-${r.status === "approved" ? "paid" : "review"}`}>{r.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead><tr><th>Datum</th><th>Leverantör</th><th>Kategori</th><th>BAS</th><th className="num">Moms</th><th className="num">Total</th><th>Status</th></tr></thead>
+              <tbody>
+                {list.map((r) => (
+                  <tr key={r.id}>
+                    <td data-label="Datum">{r.receipt_date}</td>
+                    <td data-label="Leverantör">{r.vendor}</td>
+                    <td data-label="Kategori" className="muted">{r.category}</td>
+                    <td data-label="BAS" className="muted">{r.bas_account}</td>
+                    <td data-label="Moms" className="num">{fmt(r.vat_amount)}</td>
+                    <td data-label="Total" className="num">{fmt(r.total)} {r.currency || "SEK"}</td>
+                    <td data-label="Status"><span className={`badge badge-${r.status === "approved" ? "paid" : "review"}`}>{r.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

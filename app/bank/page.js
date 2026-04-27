@@ -61,20 +61,22 @@ export default function BankPage() {
 
       <div className="card" style={{ padding: 0 }}>
         {txs.length === 0 ? <div className="empty">Inga transaktioner ännu.</div> : (
-          <table className="table">
-            <thead><tr><th>Datum</th><th>Beskrivning</th><th>Bank</th><th className="num">Belopp</th><th>Matchad</th></tr></thead>
-            <tbody>
-              {txs.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.tx_date}</td>
-                  <td>{t.description}</td>
-                  <td className="muted">{t.bank}</td>
-                  <td className="num" style={{ color: Number(t.amount) >= 0 ? "var(--ok)" : "var(--error)" }}>{fmt(t.amount)} kr</td>
-                  <td>{t.matched_receipt ? "kvitto" : t.matched_invoice ? "faktura" : <span className="muted">—</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead><tr><th>Datum</th><th>Beskrivning</th><th>Bank</th><th className="num">Belopp</th><th>Matchad</th></tr></thead>
+              <tbody>
+                {txs.map((t) => (
+                  <tr key={t.id}>
+                    <td data-label="Datum">{t.tx_date}</td>
+                    <td data-label="Beskrivning">{t.description}</td>
+                    <td data-label="Bank" className="muted">{t.bank}</td>
+                    <td data-label="Belopp" className="num" style={{ color: Number(t.amount) >= 0 ? "var(--ok)" : "var(--error)" }}>{fmt(t.amount)} {t.currency || "kr"}</td>
+                    <td data-label="Matchad">{t.matched_receipt ? "kvitto" : t.matched_invoice ? "faktura" : <span className="muted">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

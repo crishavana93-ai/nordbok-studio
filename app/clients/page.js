@@ -65,21 +65,23 @@ export default function ClientsPage() {
 
       <div className="card" style={{ padding: 0 }}>
         {list.length === 0 ? <div className="empty">Inga kunder ännu.</div> : (
-          <table className="table">
-            <thead><tr><th>Namn</th><th>Kontakt</th><th>E-post</th><th>Land</th><th>Org/Pers-nr</th><th></th></tr></thead>
-            <tbody>
-              {list.map((c) => (
-                <tr key={c.id}>
-                  <td><strong>{c.name}</strong></td>
-                  <td>{c.contact_person || "—"}</td>
-                  <td>{c.email || "—"}</td>
-                  <td>{c.country_code}</td>
-                  <td className="muted">{c.org_nr || "—"}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => setEditing(c)}>Redigera</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead><tr><th>Namn</th><th>Kontakt</th><th>E-post</th><th>Land</th><th>Org/Pers-nr</th><th></th></tr></thead>
+              <tbody>
+                {list.map((c) => (
+                  <tr key={c.id}>
+                    <td data-label="Namn"><strong>{c.name}</strong></td>
+                    <td data-label="Kontakt">{c.contact_person || "—"}</td>
+                    <td data-label="E-post">{c.email || "—"}</td>
+                    <td data-label="Land">{c.country_code}</td>
+                    <td data-label="Org/Pers-nr" className="muted">{c.org_nr || "—"}</td>
+                    <td data-label=""><button className="btn btn-ghost btn-sm" onClick={() => setEditing(c)}>Redigera</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

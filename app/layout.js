@@ -1,6 +1,7 @@
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import SwReg from "@/components/SwReg";
+import InstallPrompt from "@/components/InstallPrompt";
 import { serverClient } from "@/lib/supabase-server";
 
 export const metadata = {
@@ -29,6 +30,7 @@ export default async function RootLayout({ children }) {
           <main style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>{children}</main>
         )}
         <SwReg />
+        <InstallPrompt />
       </body>
     </html>
   );

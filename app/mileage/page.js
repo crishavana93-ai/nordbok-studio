@@ -111,22 +111,24 @@ export default function MileagePage() {
         {list.length === 0 ? (
           <div className="empty">Inga resor ännu.</div>
         ) : (
-          <table className="table">
-            <thead><tr><th>Datum</th><th>Resa</th><th>Syfte</th><th>Reg</th><th className="num">Km</th><th className="num">Avdrag</th><th></th></tr></thead>
-            <tbody>
-              {list.map((x) => (
-                <tr key={x.id}>
-                  <td>{x.trip_date}</td>
-                  <td>{x.from_address} → {x.to_address}</td>
-                  <td className="muted">{x.purpose}</td>
-                  <td className="muted">{x.vehicle_reg || "—"}</td>
-                  <td className="num">{x.km}</td>
-                  <td className="num">{fmt(x.deduction)} kr</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => delTrip(x.id)}>×</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead><tr><th>Datum</th><th>Resa</th><th>Syfte</th><th>Reg</th><th className="num">Km</th><th className="num">Avdrag</th><th></th></tr></thead>
+              <tbody>
+                {list.map((x) => (
+                  <tr key={x.id}>
+                    <td data-label="Datum">{x.trip_date}</td>
+                    <td data-label="Resa">{x.from_address} → {x.to_address}</td>
+                    <td data-label="Syfte" className="muted">{x.purpose}</td>
+                    <td data-label="Reg" className="muted">{x.vehicle_reg || "—"}</td>
+                    <td data-label="Km" className="num">{x.km}</td>
+                    <td data-label="Avdrag" className="num">{fmt(x.deduction)} kr</td>
+                    <td data-label=""><button className="btn btn-ghost btn-sm" onClick={() => delTrip(x.id)}>Ta bort</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

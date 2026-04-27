@@ -1,22 +1,28 @@
 {
+  "id": "/?source=pwa",
   "name": "Nordbok Studio",
   "short_name": "Nordbok",
   "description": "Daglig bokföring för enskild firma — fakturor, kvitton, körjournal, deadlines.",
-  "start_url": "/dashboard",
+  "start_url": "/dashboard?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
   "background_color": "#fafaf7",
   "theme_color": "#0d3a2a",
   "lang": "sv-SE",
+  "dir": "ltr",
+  "categories": ["finance", "productivity", "business"],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Ny faktura", "url": "/invoices/new" },
-    { "name": "Scanna kvitto", "url": "/receipts" },
-    { "name": "Logga resa", "url": "/mileage" },
-    { "name": "Assistent", "url": "/assistant" }
+    { "name": "Ny faktura", "short_name": "Faktura", "url": "/invoices/new", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Scanna kvitto", "short_name": "Kvitto", "url": "/receipts", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Logga resa", "short_name": "Resa", "url": "/mileage", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Assistent", "short_name": "Assist", "url": "/assistant", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
   ]
 }

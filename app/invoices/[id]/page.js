@@ -75,22 +75,24 @@ export default async function InvoiceView({ params }) {
             )}
           </div>
 
-          <table className="table" style={{ marginBottom: 24 }}>
-            <thead>
-              <tr><th>Beskrivning</th><th className="num">Antal</th><th className="num">À-pris</th><th className="num">Moms %</th><th className="num">Summa</th></tr>
-            </thead>
-            <tbody>
-              {(items || []).map((it) => (
-                <tr key={it.id}>
-                  <td>{it.description}{it.rot_rut_hours ? <span className="muted"> · {it.rot_rut_hours} arb.tim</span> : null}</td>
-                  <td className="num">{it.quantity} {it.unit}</td>
-                  <td className="num">{fmt(it.unit_price)}</td>
-                  <td className="num">{it.vat_rate}%</td>
-                  <td className="num">{fmt(Number(it.quantity) * Number(it.unit_price))}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap" style={{ marginBottom: 24 }}>
+            <table className="table">
+              <thead>
+                <tr><th>Beskrivning</th><th className="num">Antal</th><th className="num">À-pris</th><th className="num">Moms %</th><th className="num">Summa</th></tr>
+              </thead>
+              <tbody>
+                {(items || []).map((it) => (
+                  <tr key={it.id}>
+                    <td>{it.description}{it.rot_rut_hours ? <span className="muted"> · {it.rot_rut_hours} arb.tim</span> : null}</td>
+                    <td className="num">{it.quantity} {it.unit}</td>
+                    <td className="num">{fmt(it.unit_price)}</td>
+                    <td className="num">{it.vat_rate}%</td>
+                    <td className="num">{fmt(Number(it.quantity) * Number(it.unit_price))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <table style={{ minWidth: 260 }}>

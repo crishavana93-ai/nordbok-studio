@@ -89,7 +89,8 @@ export default function DeadlinesPage() {
         {loading ? <div className="empty">Laddar...</div> : list.length === 0 ? (
           <div className="empty">Inga öppna deadlines. Klicka "Importera Skatteverket-deadlines" för att lägga in moms-deklarationer, NE-bilaga, F-skatt månadsbetalningar.</div>
         ) : (
-          <table className="table">
+          <div className="table-wrap">
+          <table className="table table-stack">
             <thead><tr><th>När</th><th>Titel</th><th>Kategori</th><th>Prio</th><th></th></tr></thead>
             <tbody>
               {list.map((t) => {
@@ -97,27 +98,28 @@ export default function DeadlinesPage() {
                 const tone = d < 0 ? "badge-overdue" : d <= 7 ? "badge-review" : "badge-draft";
                 return (
                   <tr key={t.id}>
-                    <td>
+                    <td data-label="När">
                       <div>{new Date(t.due_at).toLocaleDateString("sv-SE")}</div>
                       <div className="muted" style={{ fontSize: 12 }}>
                         <span className={`badge ${tone}`}>{d < 0 ? `${-d} dagar sen` : d === 0 ? "idag" : `om ${d} dagar`}</span>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Titel">
                       <strong>{t.title}</strong>
                       {t.description && <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{t.description}</div>}
                     </td>
-                    <td className="muted">{t.category}</td>
-                    <td><span className={`badge ${t.priority === "high" ? "badge-overdue" : t.priority === "low" ? "badge-draft" : "badge-sent"}`}>{t.priority}</span></td>
-                    <td>
+                    <td data-label="Kategori" className="muted">{t.category}</td>
+                    <td data-label="Prio"><span className={`badge ${t.priority === "high" ? "badge-overdue" : t.priority === "low" ? "badge-draft" : "badge-sent"}`}>{t.priority}</span></td>
+                    <td data-label="" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => snooze(t.id, 7)}>+7d</button>
-                      <button className="btn btn-sm" onClick={() => markDone(t.id)} style={{ marginLeft: 6 }}>Klar</button>
+                      <button className="btn btn-sm" onClick={() => markDone(t.id)}>Klar</button>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </>

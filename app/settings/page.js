@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { browserClient } from "@/lib/supabase";
 import { validPersonnummer, validOrgNr, buildVatNumber } from "@/lib/swedish-tax";
+import { CURRENCIES } from "@/lib/currency";
 
 export default function SettingsPage() {
   const sb = useMemo(() => browserClient(), []);
@@ -86,6 +87,18 @@ export default function SettingsPage() {
             <div className="field"><label className="label">OSS-registrerad?</label>
               <select className="select" value={s.oss_registered ? "1" : "0"} onChange={(e) => setS({ ...s, oss_registered: e.target.value === "1" })}>
                 <option value="0">Nej</option><option value="1">Ja (B2C EU försäljning över 99 680 kr)</option>
+              </select>
+            </div>
+            <div className="field"><label className="label">Standardvaluta för fakturor</label>
+              <select className="select" value={s.default_currency || "SEK"} onChange={(e) => setS({ ...s, default_currency: e.target.value })}>
+                {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+              </select>
+            </div>
+            <div className="field"><label className="label">Föredraget språk i UI</label>
+              <select className="select" value={s.preferred_locale || "sv-SE"} onChange={(e) => setS({ ...s, preferred_locale: e.target.value })}>
+                <option value="sv-SE">Svenska (sv-SE)</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
               </select>
             </div>
           </div>

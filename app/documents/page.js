@@ -110,22 +110,24 @@ export default function DocumentsPage() {
 
       <div className="card" style={{ padding: 0 }}>
         {list.length === 0 ? <div className="empty">Inga dokument ännu.</div> : (
-          <table className="table">
-            <thead><tr><th>Titel</th><th>Typ</th><th>Kategori</th><th>Utgivet</th><th>Spara t.o.m.</th><th>Storlek</th><th></th></tr></thead>
-            <tbody>
-              {list.map((d) => (
-                <tr key={d.id}>
-                  <td><strong>{d.title}</strong>{d.tags?.length > 0 && <div style={{ marginTop: 2 }}>{d.tags.map((t) => <span key={t} className="tag-chip" style={{ marginRight: 4 }}>{t}</span>)}</div>}</td>
-                  <td className="muted">{d.doc_type}</td>
-                  <td className="muted">{d.category || "—"}</td>
-                  <td>{d.issued_date}</td>
-                  <td>{d.retention_until}</td>
-                  <td className="muted num">{fmtBytes(d.size_bytes)}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => open(d)}>Öppna</button> <button className="btn btn-ghost btn-sm" onClick={() => del(d)}>×</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table className="table table-stack">
+              <thead><tr><th>Titel</th><th>Typ</th><th>Kategori</th><th>Utgivet</th><th>Spara t.o.m.</th><th>Storlek</th><th></th></tr></thead>
+              <tbody>
+                {list.map((d) => (
+                  <tr key={d.id}>
+                    <td data-label="Titel"><strong>{d.title}</strong>{d.tags?.length > 0 && <div style={{ marginTop: 2 }}>{d.tags.map((t) => <span key={t} className="tag-chip" style={{ marginRight: 4 }}>{t}</span>)}</div>}</td>
+                    <td data-label="Typ" className="muted">{d.doc_type}</td>
+                    <td data-label="Kategori" className="muted">{d.category || "—"}</td>
+                    <td data-label="Utgivet">{d.issued_date}</td>
+                    <td data-label="Spara t.o.m.">{d.retention_until}</td>
+                    <td data-label="Storlek" className="muted num">{fmtBytes(d.size_bytes)}</td>
+                    <td data-label="" style={{ display: "flex", gap: 6 }}><button className="btn btn-ghost btn-sm" onClick={() => open(d)}>Öppna</button><button className="btn btn-ghost btn-sm" onClick={() => del(d)}>Ta bort</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

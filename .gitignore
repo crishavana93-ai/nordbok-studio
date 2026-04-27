@@ -1,8 +1,9 @@
 node_modules
 .next
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.local.example
 .DS_Store
 *.log
 .vercel
+supabase/migrations/_combined.sql
