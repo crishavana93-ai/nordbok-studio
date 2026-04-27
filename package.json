@@ -1,0 +1,21 @@
+{
+  "name": "nordbok-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Daily-use accounting app for Swedish enskild firma — invoices, receipts (OCR), mileage (körjournal), bank-CSV deductions.",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "resend": "^4.0.1",
+    "web-push": "^3.6.7"
+  }
+}
