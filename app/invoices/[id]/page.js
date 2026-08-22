@@ -1,136 +1,270 @@
+/* app/invoices/[id]/page.js — DIRECTION A · KONTOR
+ *
+ * Two things stacked, and they are not the same kind of object:
+ *
+ *  1. THE CONTROLS — app chrome. Direction A: 400/500/600, hairlines, no shadows.
+ *  2. THE DOCUMENT — a facsimile of what the customer receives. It obeys the
+ *     invoice's own conventions rather than the app's, because that is the point of
+ *     a facsimile. It still uses the app's tokens so it reads correctly in dark mode.
+ *
+ * ComplianceGate is mounted here, and this is the only place a draft can be sent.
+ * It was written weeks ago and had never once rendered — the send button beside it
+ * had its own code path that skipped the checks entirely.
+ */
+
 import Link from "next/link";
-import { serverClient } from "@/lib/supabase-server";
 import { notFound } from "next/navigation";
+import { serverClient } from "@/lib/supabase-server";
 import InvoiceActions from "./actions";
+import ComplianceGate from "@/components/invoices/ComplianceGate";
+import { money, num, pct, dateISO, daysPhrase } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-const fmt = (n) => new Intl.NumberFormat("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+
+const STATUS = {
+  draft:          { label: "Utkast",     tone: "bg-raised text-ink-3" },
+  sent:           { label: "Skickad",    tone: "bg-raised text-ink-2" },
+  partially_paid: { label: "Delbetald",  tone: "bg-warn-bg text-warn" },
+  paid:           { label: "Betald",     tone: "bg-good-bg text-good" },
+  cancelled:      { label: "Makulerad",  tone: "bg-raised text-ink-3" },
+};
+
+function Kr({ value, decimals = 2, className = "" }) {
+  const m = money(value, { decimals });
+  return (
+    <span className={`tnum ${className}`} lang="sv-SE" aria-label={m.spoken}>{m.text}</span>
+  );
+}
+
+function Block({ label, children }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="micro-label">{label}</span>
+      <div className="text-[13px] leading-relaxed text-ink-2">{children}</div>
+    </div>
+  );
+}
 
 export default async function InvoiceView({ params }) {
   const { id } = await params;
   const sb = await serverClient();
-  const { data: inv } = await sb.from("studio_invoices").select("*, studio_clients(*)").eq("id", id).maybeSingle();
+
+  const { data: inv, error } = await sb
+    .from("studio_invoices").select("*, studio_clients(*)").eq("id", id).maybeSingle();
+  if (error) console.error("[invoice]", error.message);
   if (!inv) return notFound();
-  const { data: items } = await sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position");
-  const { data: settings } = await sb.from("studio_settings").select("*").maybeSingle();
+
+  const [{ data: items }, { data: settings }] = await Promise.all([
+    sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position"),
+    sb.from("studio_settings").select("*").maybeSingle(),
+  ]);
+
+  const c = inv.studio_clients;
+  const s = STATUS[inv.status] || { label: inv.status, tone: "bg-raised text-ink-3" };
+  const isDraft = inv.status === "draft";
+  const termDays = inv.due_date && inv.issue_date
+    ? Math.round((new Date(inv.due_date) - new Date(inv.issue_date)) / 86400000)
+    : null;
+  const daysToDue = inv.due_date
+    ? Math.round((new Date(inv.due_date) - new Date(dateISO(new Date()))) / 86400000)
+    : null;
+  const unpaidAndDue = ["sent", "partially_paid"].includes(inv.status) && daysToDue != null;
 
   return (
-    <>
-      <div className="spread" style={{ marginBottom: 18 }}>
-        <div>
-          <h1 className="h1">Faktura #{inv.invoice_number}</h1>
-          <div className="muted">{inv.studio_clients?.name || "—"} · <span className={`badge badge-${inv.status}`}>{inv.status}</span></div>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+
+      {/* ── Controls ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="micro-label">
+            {inv.invoice_number ? `Faktura ${inv.invoice_number}` : "Utkast · inget nummer ännu"}
+          </span>
+          <h1 className="mt-1 truncate text-[21px] font-medium tracking-[-0.015em]">
+            {c?.name || "Ingen kund vald"}
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`inline-block rounded px-2 py-0.5 font-mono text-[10.5px] font-medium ${s.tone}`}>
+              {s.label}
+            </span>
+            {unpaidAndDue && (
+              <span className={`font-mono text-[11.5px] ${daysToDue < 0 ? "text-crit" : "text-ink-3"}`}>
+                {daysPhrase(daysToDue)}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="row">
-          <Link className="btn btn-ghost" href="/invoices">← Tillbaka</Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/invoices"
+            className="rounded-[var(--radius-ctl)] border border-border-firm px-3 py-2 text-[13px] font-medium text-ink-2 hover:text-ink"
+          >
+            Tillbaka
+          </Link>
           <InvoiceActions invoice={inv} />
         </div>
       </div>
 
-      <div className="card" style={{ padding: 0 }}>
-        <div style={{ padding: 28 }}>
-          <div className="spread" style={{ alignItems: "flex-start", marginBottom: 24 }}>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>{settings?.business_name || "—"}</div>
-              <div style={{ fontSize: 13, color: "var(--text-soft)", whiteSpace: "pre-line" }}>
-                {settings?.address_street}{"\n"}
-                {settings?.address_zip} {settings?.address_city}{"\n"}
-                Personnr: {settings?.personnummer || "—"}{"\n"}
-                {settings?.vat_number && `Moms-nr: ${settings.vat_number}\n`}
-                {settings?.f_skatt_approved && "Godkänd för F-skatt"}
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-.02em" }}>FAKTURA</div>
-              <div style={{ fontSize: 13, color: "var(--text-soft)", marginTop: 6 }}>
-                Nr: <strong>{inv.invoice_number}</strong><br />
-                Datum: {inv.issue_date}<br />
-                Förfaller: <strong>{inv.due_date}</strong><br />
-                OCR: <span className="num" style={{ fontFamily: "ui-monospace, monospace" }}>{inv.ocr_number}</span>
-              </div>
+      {/* ── The gate. The only route from draft to sent. ──────────────────── */}
+      {isDraft && (
+        <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <h2 className="mb-1 text-[15.5px] font-medium tracking-[-0.01em]">Skicka fakturan</h2>
+          <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-3">
+            Vi kontrollerar mot kraven i mervärdesskattelagen 17 kap. innan något skickas.
+          </p>
+          <ComplianceGate invoiceId={inv.id} label="Kontrollera och skicka" />
+        </section>
+      )}
+
+      {/* ── The document ─────────────────────────────────────────────────── */}
+      <article className="rounded-[var(--radius-card)] border border-border bg-surface p-5 sm:p-8">
+        <header className="mb-7 flex flex-wrap items-start justify-between gap-6">
+          <div>
+            <div className="text-[19px] font-semibold tracking-[-0.015em]">{settings?.business_name || "—"}</div>
+            <div className="mt-1.5 whitespace-pre-line text-[13px] leading-relaxed text-ink-2">
+              {[
+                settings?.address_street,
+                [settings?.address_zip, settings?.address_city].filter(Boolean).join(" "),
+                settings?.personnummer ? `Personnr: ${settings.personnummer}` : null,
+                settings?.vat_number ? `Moms-nr: ${settings.vat_number}` : null,
+                settings?.f_skatt_approved ? "Godkänd för F-skatt" : null,
+              ].filter(Boolean).join("\n")}
             </div>
           </div>
+          <div className="text-right">
+            <div className="text-[15px] font-semibold uppercase tracking-[0.14em]">Faktura</div>
+            <dl className="mt-2.5 grid grid-cols-[auto_auto] justify-end gap-x-3 gap-y-1 text-[13px]">
+              <dt className="text-ink-3">Nr</dt>
+              <dd className="font-mono text-ink">{inv.invoice_number || "—"}</dd>
+              <dt className="text-ink-3">Datum</dt>
+              <dd className="font-mono text-ink">{dateISO(inv.issue_date)}</dd>
+              <dt className="text-ink-3">Förfaller</dt>
+              <dd className="font-mono text-ink">{dateISO(inv.due_date)}</dd>
+              <dt className="text-ink-3">OCR</dt>
+              <dd className="tnum font-mono text-ink">{inv.ocr_number || "—"}</dd>
+            </dl>
+          </div>
+        </header>
 
-          <div className="grid-2" style={{ marginBottom: 24 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Faktureras till</div>
-              <div style={{ fontWeight: 600 }}>{inv.studio_clients?.name}</div>
-              <div style={{ fontSize: 13, color: "var(--text-soft)", whiteSpace: "pre-line" }}>
-                {inv.studio_clients?.address_street}{"\n"}
-                {inv.studio_clients?.address_zip} {inv.studio_clients?.address_city}{"\n"}
-                {inv.studio_clients?.country_code !== "SE" && inv.studio_clients?.country_code}
-                {inv.studio_clients?.org_nr && `\nOrg-nr: ${inv.studio_clients.org_nr}`}
-                {inv.studio_clients?.vat_number && `\nVAT: ${inv.studio_clients.vat_number}`}
-              </div>
+        <div className="mb-7 grid gap-6 sm:grid-cols-2">
+          <Block label="Faktureras till">
+            <div className="font-medium text-ink">{c?.name || "—"}</div>
+            <div className="mt-0.5 whitespace-pre-line">
+              {[
+                c?.address_street,
+                [c?.address_zip, c?.address_city].filter(Boolean).join(" "),
+                c?.country_code && c.country_code !== "SE" ? c.country_code : null,
+                c?.org_nr ? `Org-nr: ${c.org_nr}` : null,
+                c?.vat_number ? `VAT: ${c.vat_number}` : null,
+              ].filter(Boolean).join("\n")}
             </div>
-            {inv.rot_rut_type && (
-              <div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{inv.rot_rut_type}-arbete</div>
-                <div style={{ fontSize: 13, color: "var(--text-soft)" }}>
-                  Fastighetsbeteckning: <strong>{inv.studio_clients?.fastighetsbeteckning || "—"}</strong><br />
-                  Personnr (kund): {inv.studio_clients?.org_nr || "—"}<br />
-                  {inv.rot_rut_type}-avdrag: <strong>{fmt(Number(inv.rot_amount) || Number(inv.rut_amount))} kr</strong>
-                </div>
-              </div>
-            )}
-          </div>
+          </Block>
 
-          <div className="table-wrap" style={{ marginBottom: 24 }}>
-            <table className="table">
-              <thead>
-                <tr><th>Beskrivning</th><th className="num">Antal</th><th className="num">À-pris</th><th className="num">Moms %</th><th className="num">Summa</th></tr>
-              </thead>
-              <tbody>
-                {(items || []).map((it) => (
-                  <tr key={it.id}>
-                    <td>{it.description}{it.rot_rut_hours ? <span className="muted"> · {it.rot_rut_hours} arb.tim</span> : null}</td>
-                    <td className="num">{it.quantity} {it.unit}</td>
-                    <td className="num">{fmt(it.unit_price)}</td>
-                    <td className="num">{it.vat_rate}%</td>
-                    <td className="num">{fmt(Number(it.quantity) * Number(it.unit_price))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <table style={{ minWidth: 260 }}>
-              <tbody>
-                <tr><td style={{ padding: "4px 12px", color: "var(--text-soft)" }}>Delsumma</td><td className="num" style={{ padding: "4px 12px" }}>{fmt(inv.subtotal)} kr</td></tr>
-                <tr><td style={{ padding: "4px 12px", color: "var(--text-soft)" }}>Moms</td><td className="num" style={{ padding: "4px 12px" }}>{fmt(inv.vat_amount)} kr</td></tr>
-                {Number(inv.rot_amount) > 0 && <tr><td style={{ padding: "4px 12px" }}>ROT-avdrag</td><td className="num" style={{ padding: "4px 12px" }}>−{fmt(inv.rot_amount)} kr</td></tr>}
-                {Number(inv.rut_amount) > 0 && <tr><td style={{ padding: "4px 12px" }}>RUT-avdrag</td><td className="num" style={{ padding: "4px 12px" }}>−{fmt(inv.rut_amount)} kr</td></tr>}
-                <tr style={{ borderTop: "2px solid var(--text)" }}><td style={{ padding: "8px 12px", fontWeight: 700, fontSize: 16 }}>Att betala</td><td className="num" style={{ padding: "8px 12px", fontWeight: 700, fontSize: 18 }}>{fmt(inv.total)} kr</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          {inv.reverse_charge && (
-            <div style={{ marginTop: 16, padding: 12, background: "var(--bg-soft)", borderRadius: 9, fontSize: 13 }}>
-              <strong>Omvänd skattskyldighet.</strong> Köparen redovisar moms enligt artikel 196 i mervärdesskattedirektivet.
-            </div>
+          {inv.rot_rut_type && (
+            <Block label={`${inv.rot_rut_type}-arbete`}>
+              Fastighetsbeteckning:{" "}
+              <span className="text-ink">{c?.fastighetsbeteckning || "—"}</span>
+              <br />
+              Personnr (kund): <span className="font-mono text-ink">{c?.org_nr || "—"}</span>
+              <br />
+              {inv.rot_rut_type}-avdrag:{" "}
+              <Kr value={Number(inv.rot_amount) || Number(inv.rut_amount) || 0} className="text-ink" />
+            </Block>
           )}
-
-          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)", fontSize: 13, color: "var(--text-soft)" }}>
-            <div className="grid-2">
-              <div>
-                <strong>Betalning:</strong><br />
-                {settings?.bankgiro && <>Bankgiro: <strong>{settings.bankgiro}</strong><br /></>}
-                {settings?.iban && <>IBAN: <strong>{settings.iban}</strong><br /></>}
-                {settings?.plusgiro && <>Plusgiro: <strong>{settings.plusgiro}</strong><br /></>}
-                Vid betalning ange OCR: <strong>{inv.ocr_number}</strong>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <strong>Betalningsvillkor:</strong> {Math.ceil((new Date(inv.due_date) - new Date(inv.issue_date)) / 86400000)} dagar<br />
-                Dröjsmålsränta enligt räntelagen.<br />
-                {settings?.f_skatt_approved && <span>Godkänd för F-skatt.</span>}
-              </div>
-            </div>
-            {inv.notes && <div style={{ marginTop: 12 }}>{inv.notes}</div>}
-          </div>
         </div>
-      </div>
-    </>
+
+        <div data-scroll-x className="mb-6">
+          <table className="w-full min-w-[460px] border-collapse">
+            <thead>
+              <tr>
+                <th className="micro-label border-b border-border px-2 py-2 text-left">Beskrivning</th>
+                <th className="micro-label border-b border-border px-2 py-2 text-right">Antal</th>
+                <th className="micro-label border-b border-border px-2 py-2 text-right">À-pris</th>
+                <th className="micro-label border-b border-border px-2 py-2 text-right">Moms</th>
+                <th className="micro-label border-b border-border px-2 py-2 text-right">Summa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-2 py-6 text-center text-[13px] text-ink-3">
+                    Inga rader på fakturan ännu.
+                  </td>
+                </tr>
+              ) : (
+                items.map((it) => (
+                  <tr key={it.id}>
+                    <td className="border-b border-border px-2 py-2.5 text-[13.5px]">
+                      {it.description}
+                      {it.rot_rut_hours ? (
+                        <span className="text-ink-3"> · {num(it.rot_rut_hours)} arb.tim</span>
+                      ) : null}
+                    </td>
+                    <td className="tnum border-b border-border px-2 py-2.5 text-right font-mono text-[13px] text-ink-2">
+                      {num(it.quantity, { decimals: Number(it.quantity) % 1 ? 2 : 0 })} {it.unit}
+                    </td>
+                    <td className="border-b border-border px-2 py-2.5 text-right">
+                      <Kr value={it.unit_price} className="font-mono text-[13px] text-ink-2" />
+                    </td>
+                    <td className="tnum border-b border-border px-2 py-2.5 text-right font-mono text-[13px] text-ink-2">
+                      {pct(it.vat_rate)}
+                    </td>
+                    <td className="border-b border-border px-2 py-2.5 text-right">
+                      <Kr value={Number(it.quantity) * Number(it.unit_price)} className="font-mono text-[13px]" />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex justify-end">
+          <dl className="grid w-full max-w-[300px] grid-cols-[1fr_auto] gap-x-6 gap-y-1.5 text-[13.5px]">
+            <dt className="text-ink-2">Delsumma</dt>
+            <dd className="text-right"><Kr value={inv.subtotal} className="font-mono" /></dd>
+            <dt className="text-ink-2">Moms</dt>
+            <dd className="text-right"><Kr value={inv.vat_amount} className="font-mono" /></dd>
+            {Number(inv.rot_amount) > 0 && (<>
+              <dt className="text-ink-2">ROT-avdrag</dt>
+              <dd className="text-right"><Kr value={-Math.abs(inv.rot_amount)} className="font-mono" /></dd>
+            </>)}
+            {Number(inv.rut_amount) > 0 && (<>
+              <dt className="text-ink-2">RUT-avdrag</dt>
+              <dd className="text-right"><Kr value={-Math.abs(inv.rut_amount)} className="font-mono" /></dd>
+            </>)}
+            <dt className="mt-2 border-t-2 border-ink pt-2.5 text-[15px] font-medium text-ink">Att betala</dt>
+            <dd className="mt-2 border-t-2 border-ink pt-2.5 text-right">
+              <Kr value={inv.total} className="font-mono text-[17px] font-medium" />
+            </dd>
+          </dl>
+        </div>
+
+        {inv.reverse_charge && (
+          <p className="mt-6 rounded-[var(--radius-ctl)] bg-raised px-4 py-3 text-[13px] leading-relaxed text-ink-2">
+            <span className="font-medium text-ink">Omvänd skattskyldighet.</span> Köparen
+            redovisar moms enligt artikel 196 i mervärdesskattedirektivet.
+          </p>
+        )}
+
+        <footer className="mt-7 grid gap-6 border-t border-border pt-5 sm:grid-cols-2">
+          <Block label="Betalning">
+            {settings?.bankgiro && (<>Bankgiro: <span className="font-mono text-ink">{settings.bankgiro}</span><br /></>)}
+            {settings?.iban && (<>IBAN: <span className="font-mono text-ink">{settings.iban}</span><br /></>)}
+            {settings?.plusgiro && (<>Plusgiro: <span className="font-mono text-ink">{settings.plusgiro}</span><br /></>)}
+            Ange OCR: <span className="tnum font-mono text-ink">{inv.ocr_number || "—"}</span>
+          </Block>
+          <Block label="Villkor">
+            Betalningsvillkor: {termDays != null ? `${num(termDays)} dagar` : "—"}
+            <br />
+            Dröjsmålsränta enligt räntelagen.
+            {settings?.f_skatt_approved && (<><br />Godkänd för F-skatt.</>)}
+          </Block>
+        </footer>
+
+        {inv.notes && (
+          <p className="mt-5 border-t border-border pt-4 text-[13px] leading-relaxed text-ink-2">{inv.notes}</p>
+        )}
+      </article>
+    </div>
   );
 }

@@ -30,6 +30,16 @@ export default function FinansieringPage() {
         <div className="muted">Bankkonto, lån, kort, hur du bygger företagskredit som enskild firma — och vad ingen säger åt dig.</div>
       </div>
 
+      <Link href="/finansiering/plan" className="card" style={{ marginBottom: 14, display: "block", textDecoration: "none", color: "inherit", background: "linear-gradient(135deg, var(--accent-soft), var(--bg-card))" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 28 }}>🎯</span>
+          <div>
+            <strong style={{ fontSize: 16 }}>12-månaders kreditplan — kom igång</strong>
+            <div className="muted" style={{ fontSize: 13 }}>Aktivera den steg-för-steg checklista för att gå från "tunn fil" till godkänd företagskredit, med klar-att-kopiera-skript för Swedbank och Almi.</div>
+          </div>
+        </div>
+      </Link>
+
       <div className="alert alert-info" style={{ marginBottom: 14 }}>
         <strong>Inledning:</strong> Denna sida är information, inte personlig finansiell rådgivning. Räntor och villkor 2026 är ungefärliga och ändras — kolla alltid med banken före beslut. För komplexa fall: konsultera revisor eller företagsrådgivare.
       </div>

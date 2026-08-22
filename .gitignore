@@ -7,3 +7,9 @@ node_modules
 *.log
 .vercel
 supabase/migrations/_combined.sql
+
+# Working backups and editor/FUSE artefacts — never commit these
+.css-backup-*/
+*.bak
+*.legacy.js
+.fuse_hidden*

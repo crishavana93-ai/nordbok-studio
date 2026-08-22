@@ -1,0 +1,210 @@
+"use client";
+
+/* components/dashboard/DashboardClient.jsx — DIRECTION A · KONTOR
+ *
+ * LAW 08 — sparse on the surface. Hero, three tiles, one chart, and a queue that is
+ * absent entirely when there is nothing to do. Nothing else earns a place here. If
+ * you want to add something, it belongs one tap down.
+ *
+ * LAW 01 — the hero is bound to touch: tapping it opens the box-by-box sheet, and
+ * every figure ROLLS to its new value when you switch venture. You should see the
+ * change happen rather than find a different number where the old one was.
+ *
+ * LAW 02 — the tiles carry no colour. They used to have a series-coloured bar along
+ * the bottom, which is decoration wearing the data palette. --s1/--s2/--s3 belong to
+ * the chart, where they identify a venture; --good and --crit belong to money
+ * direction. A tile is neither.
+ *
+ * NumberFlow renders its own digits and emits U+00A0 between thousands rather than
+ * lib/format.js's U+202F. That is a one-pixel divergence and the motion is worth it;
+ * the spoken string beside each figure still comes from format.js, so what a screen
+ * reader hears is exactly right.
+ */
+
+import { useMemo, useState } from "react";
+import NumberFlow from "@number-flow/react";
+import MonthlyChart from "./MonthlyChart";
+import MomsSheet from "./MomsSheet";
+import { money, num, dateISO, daysPhrase } from "@/lib/format";
+
+const MODES = [
+  { key: "rev", label: "Intäkter", title: "Intäkter per månad" },
+  { key: "cost", label: "Kostnader", title: "Kostnader per månad" },
+  { key: "net", label: "Netto", title: "Netto per månad" },
+];
+
+function Seg({ items, value, onChange, size = "md", label }) {
+  return (
+    <div role="group" aria-label={label}
+      className="flex gap-0.5 overflow-x-auto rounded-[var(--radius-ctl)] border border-border bg-raised p-[3px] [scrollbar-width:none]">
+      {items.map((it) => (
+        <button
+          key={it.key}
+          onClick={() => onChange(it.key)}
+          aria-pressed={value === it.key}
+          className={`whitespace-nowrap rounded-[5px] px-2.5 py-1 font-medium transition-colors
+            ${size === "sm" ? "text-[11.5px]" : "text-[12.5px]"}
+            ${value === it.key ? "bg-surface text-ink" : "text-ink-2 hover:text-ink"}`}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Tile({ label, value, note, attn }) {
+  const m = money(value, { decimals: 0 });
+  return (
+    <div className="flex min-h-[108px] flex-col gap-1.5 rounded-[var(--radius-card)] border border-border bg-surface p-4">
+      <span className="micro-label">{label}</span>
+      <span className="tnum text-[25px] font-medium tracking-[-0.02em]" lang="sv-SE" aria-hidden="true">
+        <NumberFlow value={value} locales="sv-SE" format={{ maximumFractionDigits: 0 }} suffix=" kr" />
+      </span>
+      <span className="sr-only">{m.spoken}</span>
+      <span className={`mt-auto text-[12.5px] ${attn ? "text-warn" : "text-ink-3"}`}>{note}</span>
+    </div>
+  );
+}
+
+export default function DashboardClient({ data, ventures }) {
+  const [venture, setVenture] = useState("all");
+  const [mode, setMode] = useState("rev");
+  const [sheet, setSheet] = useState(false);
+
+  const shown = venture === "all" ? ventures : ventures.filter((v) => v.key === venture);
+
+  const totals = useMemo(() => {
+    const keys = shown.map((v) => v.key);
+    const sum = (o) => keys.reduce((a, k) => a + (o[k] || []).reduce((x, y) => x + y, 0), 0);
+    return { revenue: sum(data.series.revenue), costs: sum(data.series.costs) };
+  }, [data.series, shown]);
+
+  const q = data.quarter;
+  const r49 = data.moms.rutor.r49;
+  const refund = r49 < 0;
+  const urgency = q.daysLeft <= 3 ? "crit" : q.daysLeft <= 14 ? "warn" : "good";
+  const heroSpoken = money(Math.abs(Math.round(r49)), { decimals: 0 }).spoken;
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-3">
+
+      {/* Venture filter. The moms figure is deliberately NOT filtered — there is one
+          return for the whole firma, and pretending otherwise would be a lie. */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Seg
+          label="Verksamhet"
+          value={venture}
+          onChange={setVenture}
+          items={[{ key: "all", label: "Alla" }, ...ventures.map((v) => ({ key: v.key, label: v.name }))]}
+        />
+        {venture !== "all" && (
+          <span className="font-mono text-[10.5px] text-ink-3">
+            En momsdeklaration för hela verksamheten
+          </span>
+        )}
+      </div>
+
+      {/* HERO — tap to open the box-by-box breakdown */}
+      <MomsSheet open={sheet} onOpenChange={setSheet} moms={data.moms} quarter={q}>
+        <button
+          className="w-full rounded-[var(--radius-card)] border border-border bg-surface p-5 text-left
+                     transition-colors hover:border-border-firm sm:p-7"
+        >
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="micro-label">Moms · {q.label}</span>
+            {!data.moms.fileReady && (
+              <span className="rounded bg-crit-bg px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-crit">
+                Åtgärda
+              </span>
+            )}
+          </div>
+
+          <div className={`flex flex-wrap items-baseline ${refund ? "text-good" : "text-ink"}`}>
+            <span className="hero-figure" lang="sv-SE" aria-hidden="true">
+              <NumberFlow value={Math.abs(Math.round(r49))} locales="sv-SE" format={{ maximumFractionDigits: 0 }} />
+            </span>
+            <span className="hero-unit">kr</span>
+            <span className="sr-only">{heroSpoken}</span>
+          </div>
+          <p className="mt-2 text-[14.5px] text-ink-2">
+            {refund ? "att få tillbaka" : "att betala"} · tryck för ruta för ruta
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3 border-t border-border pt-4">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px] font-medium
+              ${urgency === "crit" ? "bg-crit-bg text-crit" : urgency === "warn" ? "bg-warn-bg text-warn" : "bg-good-bg text-good"}`}>
+              <span className="size-1.5 rounded-full bg-current" />
+              {daysPhrase(q.daysLeft)}
+            </span>
+            <Meta label="Period">{dateISO(q.start)} – {dateISO(q.end)}</Meta>
+            <Meta label="Senast">{dateISO(q.deadline)}</Meta>
+            <Meta label="Metod">Kontantmetoden</Meta>
+          </div>
+        </button>
+      </MomsSheet>
+
+      {/* THREE TILES. Not four. */}
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+        <Tile
+          label={`Intäkter ${data.year}`} value={totals.revenue}
+          attn={totals.revenue === 0}
+          note={totals.revenue === 0 ? "Ingen faktura betald ännu" : "Betalt, kontantmetoden"}
+        />
+        <Tile
+          label={`Kostnader ${data.year}`} value={totals.costs}
+          attn={data.flags.needsConversion > 0}
+          note={data.flags.needsConversion > 0
+            ? `${num(data.flags.needsConversion)} poster väntar på omräkning`
+            : "Alla poster omräknade"}
+        />
+        <Tile
+          label="Obetalda fakturor" value={data.tiles.unpaid}
+          attn={data.tiles.overdue > 0}
+          note={data.tiles.overdue > 0 ? `${num(data.tiles.overdue)} förfallna` : "Inga utestående"}
+        />
+      </div>
+
+      {/* ONE CHART */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">
+            {MODES.find((m) => m.key === mode).title}
+          </h2>
+          <Seg label="Vy" size="sm" value={mode} onChange={setMode} items={MODES} />
+        </div>
+        <p className="mb-3.5 text-[12.5px] text-ink-3">
+          {data.year}, kronor. Endast poster med känt SEK-belopp.
+        </p>
+        <MonthlyChart months={data.months} series={data.series} mode={mode} ventures={shown} />
+      </section>
+
+      {/* Law 05 — the queue, with verbs. Gone entirely when there is nothing to do. */}
+      {(data.flags.untagged > 0 || data.flags.untreated > 0) && (
+        <section className="rounded-[var(--radius-card)] border border-warn/35 bg-warn-bg p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-warn">Granska</span>
+            <h2 className="text-[13.5px] font-medium text-warn">Behöver din uppmärksamhet</h2>
+          </div>
+          <ul className="flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink-2">
+            {data.flags.untreated > 0 && (
+              <li>· {num(data.flags.untreated)} kvitton saknar momsbehandling och räknas inte med i ruta 48.</li>
+            )}
+            {data.flags.untagged > 0 && (
+              <li>· {num(data.flags.untagged)} poster saknar verksamhet och syns bara under ”Alla”.</li>
+            )}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function Meta({ label, children }) {
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="micro-label">{label}</span>
+      <span className="font-mono text-[12.5px] text-ink-2">{children}</span>
+    </span>
+  );
+}

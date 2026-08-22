@@ -1,4 +1,19 @@
-/* ═══ Nordbok Studio — design tokens ═══ */
+/* ═══ Nordbok Studio — LEGACY stylesheet ═══════════════════════════════════════
+ *
+ * Imported by tailwind.css as `layer(legacy)`, which sits BELOW Tailwind's
+ * utilities. Every rule here can therefore be overridden by a utility class —
+ * that is deliberate, and it is what makes a page-by-page migration possible.
+ *
+ * These classes exist because ~13 pages still use them. Do not add new ones.
+ * When a page is migrated to Tailwind, delete the classes it was the last
+ * consumer of. The end state is that this file is empty.
+ *
+ * Rules deliberately NOT here any more, because tokens.css owns them:
+ *   body background / colour / font-family  → tokens.css (--ground, --ink, --font-sans)
+ *   .label                                  → tokens.css has .micro-label
+ *   .app-shell / .app-main mobile layout    → defined once, below
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
   --bg:        #fafaf7;
   --bg-card:   #ffffff;
@@ -18,8 +33,11 @@
   --shadow:    0 6px 20px rgba(15,23,42,.06);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top:    env(safe-area-inset-top, 0px);
-  --nav-h:       64px;       /* mobile bottom nav height (excludes safe-area) */
-  color-scheme: light;
+  --rail-w:      240px;      /* desktop sidebar width */
+  /* Height of the phone bottom nav. The nav itself is in normal flow now, so
+   * layout does not need this — but fixed-position overlays (InstallPrompt)
+   * still offset themselves by it so they don't sit under the nav. */
+  --nav-h:       64px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -33,65 +51,72 @@
     --text-muted:#888a8f;
     --accent: #6ee7b7;
     --accent-soft:#0d3a2a;
-    color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0;
-  background: var(--bg); color: var(--text);
-  -webkit-tap-highlight-color: transparent;
-  -webkit-text-size-adjust: 100%;
-  overscroll-behavior-y: none;
-}
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
-  font-size: 15px; line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  min-height: 100svh;          /* small-viewport unit — survives mobile URL-bar */
-}
+html, body { margin: 0; padding: 0; }
+body { font-size: 15px; line-height: 1.5; }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
 
-/* iOS Safari zooms inputs whose font-size < 16px on focus. Force 16px. */
 input, select, textarea {
   font-family: inherit;
-  font-size: 16px;
   -webkit-appearance: none;
   appearance: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   LAYOUT — mobile first, expand at ≥820px
+   LAYOUT — ONE definition. Phone: flex column with a sticky bottom nav.
+   From 820px (the `rail:` breakpoint in tokens.css): two-column grid with the
+   sidebar rail. These two numbers must stay in sync — see tokens.css.
    ═══════════════════════════════════════════════════════════════════════════ */
 .app-shell {
-  display: grid;
-  grid-template-columns: 1fr;
-  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+.app-main {
+  flex: 1 1 auto;
+  min-width: 0;              /* or a wide table blows the flex item out */
 }
 main {
-  padding: 16px 14px calc(var(--nav-h) + var(--safe-bottom) + 24px);
-  max-width: 1200px; width: 100%;
+  /* Safe-area aware, and the ONLY place <main> padding is set. No nav-height
+   * reserve any more: BottomNav is in normal flow, not fixed. */
+  padding-top:    max(16px, env(safe-area-inset-top, 0px));
+  padding-right:  max(14px, env(safe-area-inset-right, 0px));
+  padding-bottom: 24px;
+  padding-left:   max(14px, env(safe-area-inset-left, 0px));
+  max-width: 1200px;
+  width: 100%;
 }
 
-/* ─── Sidebar — bottom nav on mobile, side rail on desktop ─── */
-.sidebar {
-  position: fixed; left: 0; right: 0; bottom: 0; top: auto;
-  height: calc(var(--nav-h) + var(--safe-bottom));
-  padding: 6px 4px var(--safe-bottom);
-  display: flex; flex-direction: row; gap: 0;
-  background: var(--bg-card);
-  border-top: 1px solid var(--line);
-  z-index: 50;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+@media (min-width: 820px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: var(--rail-w) 1fr;
+  }
+  main {
+    padding-top: 28px;
+    padding-right: max(32px, env(safe-area-inset-right, 0px));
+    padding-bottom: 60px;
+    padding-left: 32px;
+  }
 }
-.sidebar::-webkit-scrollbar { display: none; }
-.sidebar .brand,
-.sidebar .nav-section-title,
-.sidebar .signout { display: none; }
+
+/* ─── Sidebar — desktop rail ONLY ───────────────────────────────────────────
+ * Below 820px this component is not rendered at all (layout.js hides it and
+ * BottomNav takes over), so it no longer carries a phone bottom-bar mode.
+ * That duplicate mode was the 640–819px dead band. */
+.sidebar {
+  position: sticky; top: 0;
+  height: 100dvh; width: var(--rail-w);
+  display: flex; flex-direction: column;
+  padding: 20px 14px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
 
 .brand {
   display: flex; align-items: center; gap: 10px;
@@ -105,47 +130,18 @@ main {
   flex: none;
 }
 .nav-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); padding: 14px 10px 6px; }
-.nav-link {
-  display: flex; align-items: center; gap: 4px;
-  flex: 1 0 auto; min-width: 60px;
-  flex-direction: column;
-  padding: 6px 6px;
-  border-radius: 9px;
-  color: var(--text-soft); font-size: 10px; font-weight: 500;
-  text-align: center;
-  transition: background 80ms;
-  -webkit-tap-highlight-color: transparent;
-}
-.nav-link:active { background: var(--bg-soft); }
-.nav-link.active { color: var(--accent); font-weight: 600; }
-.nav-link svg { width: 22px; height: 22px; flex: none; }
-.nav-link span { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.signout { display: flex; flex-direction: column; }
 
-@media (min-width: 820px) {
-  .app-shell { grid-template-columns: 240px 1fr; }
-  main { padding: 28px 32px 60px; }
-  .sidebar {
-    position: sticky; top: 0; bottom: auto; left: auto; right: auto;
-    height: 100svh; width: 240px;
-    flex-direction: column;
-    padding: 20px 14px;
-    border-top: 0; border-right: 1px solid var(--line);
-    overflow-y: auto;
-  }
-  .sidebar .brand,
-  .sidebar .nav-section-title,
-  .sidebar .signout { display: block; }
-  .sidebar .signout { display: flex; flex-direction: column; }
-  .nav-link {
-    flex: none; flex-direction: row; gap: 10px;
-    padding: 9px 10px; font-size: 14px;
-    text-align: left; min-width: 0;
-  }
-  .nav-link svg { width: 18px; height: 18px; }
-  .nav-link.active { background: var(--accent-soft); }
-  .nav-link span { white-space: normal; }
-  .nav-link:hover { background: var(--bg-soft); color: var(--text); }
+.nav-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: var(--text-soft); font-size: 14px; font-weight: 500;
+  transition: background 80ms;
 }
+.nav-link svg { width: 18px; height: 18px; flex: none; }
+.nav-link.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.nav-link:hover { background: var(--bg-soft); color: var(--text); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    COMMON UI
@@ -178,7 +174,6 @@ main {
   cursor: pointer;
   transition: filter 80ms, transform 80ms;
   white-space: nowrap;
-  -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 .btn:hover { filter: brightness(1.08); }
@@ -206,6 +201,10 @@ main {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
+
+/* Legacy FORM label. Distinct from tokens.css `.micro-label`, which is the
+ * design-system uppercase micro-label. These two used to share the name
+ * `.label` and silently merged into a form that matched neither. */
 .label { font-size: 13px; font-weight: 600; color: var(--text-soft); display: block; margin-bottom: 6px; }
 .field { margin-bottom: 14px; }
 
@@ -298,9 +297,10 @@ main {
 .sticky-side { position: static; }
 @media (min-width: 1000px) { .sticky-side { position: sticky; top: 20px; } }
 
-/* Hide on mobile / show on mobile helpers */
-.show-desktop { display: none; }
-@media (min-width: 820px) { .show-desktop { display: revert; } .show-mobile { display: none; } }
+/* DELETED 2026-08-22: .show-desktop / .show-mobile — zero consumers left in the
+ * codebase. Tailwind's `hidden rail:block` does this now. This is what migration
+ * looks like: when a screen stops using a legacy class, the class goes with it.
+ * The end state for this file is empty. */
 
 /* Make any direct <img> in .card responsive */
 .card img { max-width: 100%; height: auto; }

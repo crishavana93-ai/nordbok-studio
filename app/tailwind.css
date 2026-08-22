@@ -1,0 +1,27 @@
+/* app/tailwind.css — THE single stylesheet entry point.
+ *
+ * layout.js imports this file and nothing else. Do not add another CSS import
+ * anywhere; that is how the app ended up with two unreconciled systems.
+ *
+ * ── Cascade order (lowest → highest) ──────────────────────────────────────────
+ *   theme      Tailwind's design tokens (@theme in tokens.css)
+ *   base       Tailwind Preflight
+ *   legacy     globals.css — .btn/.card/.table/.input/.sidebar and friends.
+ *              Old pages still depend on these. They sit BELOW utilities so a
+ *              Tailwind class always wins on any property they both set.
+ *   components Tailwind @layer components
+ *   utilities  Tailwind utilities — the top of the stack, always authoritative
+ *
+ * Anything imported WITHOUT a layer() is unlayered and therefore beats every
+ * layer above, including utilities. That is reserved for two things only:
+ * design tokens (tokens.css) and platform correctness guards (mobile.css) —
+ * rules that must not be overridable by an ordinary utility class.
+ */
+
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss";
+
+@import "./tokens.css";
+@import "./globals.css" layer(legacy);
+@import "./mobile.css";

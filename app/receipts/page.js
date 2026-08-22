@@ -1,174 +1,269 @@
 "use client";
-import { useEffect, useMemo, useState, useRef } from "react";
-import { browserClient } from "@/lib/supabase";
 
-const fmt = (n) => new Intl.NumberFormat("sv-SE").format(Math.round(Number(n) || 0));
+/* app/receipts/page.js — DIRECTION A · KONTOR
+ *
+ * The four questions this screen answers, in order of how much they cost:
+ *   1. What still needs my attention?      → the queue, at the top, or nothing at all
+ *   2. What did I spend, and can I reclaim the moms?  → treatment on every row
+ *   3. Is anything about to under-report a period?     → missing FX, called out
+ *   4. Where is the evidence?               → the paperclip, and the hash behind it
+ *
+ * LAW 08 — sparse on the surface, dense one tap down. The list is scannable; the
+ * detail lives in the row you open. LAW 07 — a payment-terminal string is not a
+ * vendor name, so `resolveVendor` cleans it before it ever reaches the screen.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { browserClient } from "@/lib/supabase";
+import ReceiptCapture from "@/components/receipts/ReceiptCapture";
+import { money, num, dateISO, dateProse } from "@/lib/format";
+
+const TREATMENT = {
+  domestic:    { label: "Svensk moms",        tone: "good" },
+  rc_eu:       { label: "Omvänd — EU",         tone: "good" },
+  rc_non_eu:   { label: "Omvänd — utanför EU", tone: "good" },
+  oss_non_ded: { label: "OSS — ej avdragsgill", tone: "warn" },
+  exempt:      { label: "Undantagen",          tone: "muted" },
+};
+
+const TONE = {
+  good:  "bg-good-bg text-good",
+  warn:  "bg-warn-bg text-warn",
+  crit:  "bg-crit-bg text-crit",
+  muted: "bg-raised text-ink-3",
+};
+
+/* Law 07 — resolve the name before it reaches the screen.
+ * "SUMUP *CIGARR", "PAYPAL *ANTHROPIC", "WWW.KLARNA.COM/AB" are not vendors; they are
+ * acquirer strings. N26 rebuilt its whole transaction list around this one problem,
+ * and it does more for perceived quality than any animation. */
+const ACQUIRERS = /^(sumup|izettle|zettle|paypal|klarna|swish|stripe|square|adyen|nets|worldpay|wpy)\b[\s*\-.:]*/i;
+function resolveVendor(raw) {
+  if (!raw) return { name: "Okänd leverantör", via: null };
+  let s = String(raw).trim();
+  const m = s.match(ACQUIRERS);
+  const via = m ? m[1].toLowerCase() : null;
+  if (m) s = s.slice(m[0].length).trim();
+  s = s.replace(/^(www\.)?/i, "").replace(/[.\-_*]+$/, "").trim();
+  if (!s) return { name: raw, via: null };
+  // ALL-CAPS terminal strings read as shouting; title-case them.
+  if (s === s.toUpperCase() && s.length > 2) {
+    s = s.toLowerCase().replace(/(^|[\s\-/])([a-zåäö])/g, (_, a, b) => a + b.toUpperCase());
+  }
+  return { name: s, via: via ? via[0].toUpperCase() + via.slice(1) : null };
+}
+
+function Chip({ tone = "muted", children }) {
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 font-mono text-[10.5px] font-medium ${TONE[tone]}`}>
+      {children}
+    </span>
+  );
+}
 
 export default function ReceiptsPage() {
   const sb = useMemo(() => browserClient(), []);
-  const fileRef = useRef(null);
-  const cameraRef = useRef(null);
-
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
-  const [draft, setDraft] = useState(null); // OCR draft pending review
-  const [err, setErr] = useState("");
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   async function load() {
     setLoading(true);
-    const { data } = await sb.from("studio_receipts").select("*").order("receipt_date", { ascending: false }).limit(200);
+    const { data, error } = await sb
+      .from("studio_receipts")
+      .select("*")
+      .order("receipt_date", { ascending: false })
+      .limit(200);
+    // Never swallow a Supabase {data, error} — this is the trap that cost a whole
+    // session once. Log it and show it.
+    if (error) {
+      console.error("[receipts]", error.message);
+      setLoadError(error.message);
+    }
     setList(data || []);
     setLoading(false);
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  async function handleFile(file) {
-    if (!file) return;
-    setErr(""); setScanning(true);
-    try {
-      const dataUri = await new Promise((res, rej) => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result);
-        fr.onerror = rej;
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch("/api/receipts/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_base64: dataUri }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "OCR misslyckades");
-      setDraft({
-        ...j,
-        _file: file,
-        _dataUri: dataUri,
-        is_business: true,
-        is_deductible: true,
-        payment_method: "card",
-      });
-    } catch (e) { setErr(e.message); }
-    finally { setScanning(false); }
-  }
-
-  async function saveDraft() {
-    if (!draft) return;
-    setErr("");
-    const { data: { user } } = await sb.auth.getUser();
-    if (!user) return setErr("Inte inloggad");
-
-    // Upload original file to Supabase storage (receipts bucket)
-    let storage_path = null;
-    try {
-      const ext = (draft._file.name.split(".").pop() || "jpg").toLowerCase();
-      const path = `${user.id}/${new Date().getFullYear()}/${Date.now()}.${ext}`;
-      const { error: upErr } = await sb.storage.from("studio-receipts").upload(path, draft._file, { upsert: false });
-      if (!upErr) storage_path = path;
-    } catch {}
-
-    const insert = {
-      user_id: user.id,
-      receipt_date: draft.receipt_date || new Date().toISOString().slice(0, 10),
-      vendor: draft.vendor || "",
-      total: Number(draft.total) || 0,
-      vat_amount: draft.vat_amount != null ? Number(draft.vat_amount) : null,
-      vat_rate: draft.vat_rate != null ? Number(draft.vat_rate) : null,
-      currency: draft.currency || "SEK",
-      category: draft.category || null,
-      bas_account: draft.bas_account || null,
-      ne_row: draft.ne_row || null,
-      payment_method: draft.payment_method,
-      description: draft.description || null,
-      storage_path,
-      ocr_raw: draft,
-      ocr_confidence: draft.confidence ?? null,
-      is_business: draft.is_business,
-      is_deductible: draft.is_deductible,
-      source: "scan",
-      status: "approved",
-    };
-    const { error } = await sb.from("studio_receipts").insert(insert);
-    if (error) return setErr(error.message);
-    setDraft(null);
-    load();
-  }
+  const needsFx = list.filter((r) => r.currency !== "SEK" && r.total_sek == null);
+  const untreated = list.filter((r) => !r.vat_treatment);
+  const year = new Date().getFullYear();
+  const spentThisYear = list
+    .filter((r) => String(r.receipt_date || "").startsWith(String(year)))
+    .reduce((sum, r) => sum + (Number(r.total_sek ?? (r.currency === "SEK" ? r.total : 0)) || 0), 0);
+  const spent = money(spentThisYear, { decimals: 0 });
 
   return (
-    <>
-      <div className="spread" style={{ marginBottom: 18 }}>
-        <h1 className="h1">Kvitton</h1>
-        <div className="row">
-          <button className="btn" onClick={() => cameraRef.current?.click()}>Scanna med kamera</button>
-          <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>Ladda upp bild</button>
-          <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
-        </div>
-      </div>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+      <h1 className="sr-only">Kvitton</h1>
 
-      {scanning && <div className="alert alert-info">Läser kvitto med AI...</div>}
-      {err && <div className="alert alert-error">{err}</div>}
-
-      {draft && (
-        <div className="card" style={{ marginBottom: 18 }}>
-          <div className="spread" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 600 }}>Granska — AI-tolkning ({Math.round((draft.confidence || 0) * 100)}% säker)</div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setDraft(null)}>Avbryt</button>
-          </div>
-          <div className="grid-2">
-            <div>
-              {draft._dataUri && <img src={draft._dataUri} alt="kvitto" style={{ maxWidth: "100%", borderRadius: 9, border: "1px solid var(--line)" }} />}
+      {/* Hero — what these receipts are worth, and the one action */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <span className="micro-label">Kostnader {year}</span>
+            <div className="mt-1.5 flex flex-wrap items-baseline">
+              <span className="hero-figure" lang="sv-SE" aria-label={spent.spoken}>
+                {spent.text.replace(/ kr$/, "")}
+              </span>
+              <span className="hero-unit">kr</span>
             </div>
-            <div>
-              <div className="grid-2">
-                <div className="field"><label className="label">Leverantör</label><input className="input" value={draft.vendor || ""} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} /></div>
-                <div className="field"><label className="label">Datum</label><input className="input" type="date" value={draft.receipt_date || ""} onChange={(e) => setDraft({ ...draft, receipt_date: e.target.value })} /></div>
-                <div className="field"><label className="label">Belopp (totalt)</label><input className="input num" type="number" step="0.01" value={draft.total || 0} onChange={(e) => setDraft({ ...draft, total: e.target.value })} /></div>
-                <div className="field"><label className="label">Moms</label><input className="input num" type="number" step="0.01" value={draft.vat_amount ?? ""} onChange={(e) => setDraft({ ...draft, vat_amount: e.target.value })} /></div>
-                <div className="field"><label className="label">Momssats</label>
-                  <select className="select" value={draft.vat_rate ?? 25} onChange={(e) => setDraft({ ...draft, vat_rate: Number(e.target.value) })}>
-                    <option value={25}>25%</option><option value={12}>12%</option><option value={6}>6%</option><option value={0}>0%</option>
-                  </select>
-                </div>
-                <div className="field"><label className="label">Kategori</label><input className="input" value={draft.category || ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })} /></div>
-                <div className="field"><label className="label">BAS-konto</label><input className="input" value={draft.bas_account || ""} onChange={(e) => setDraft({ ...draft, bas_account: e.target.value })} /></div>
-                <div className="field"><label className="label">NE-rad</label><input className="input" value={draft.ne_row || ""} onChange={(e) => setDraft({ ...draft, ne_row: e.target.value })} /></div>
-              </div>
-              <div className="field"><label className="label">Beskrivning</label><textarea className="textarea" rows={2} value={draft.description || ""} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
-              <div className="row" style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 13 }}><input type="checkbox" checked={draft.is_business} onChange={(e) => setDraft({ ...draft, is_business: e.target.checked })} /> Företagskostnad</label>
-                <label style={{ fontSize: 13 }}><input type="checkbox" checked={draft.is_deductible} onChange={(e) => setDraft({ ...draft, is_deductible: e.target.checked })} /> Avdragsgill</label>
-              </div>
-              <button className="btn" onClick={saveDraft} style={{ width: "100%", justifyContent: "center" }}>Spara kvitto</button>
-            </div>
+            <p className="mt-2 text-[14.5px] text-ink-2">
+              {num(list.length)} kvitton sparade · bilden är verifikationen
+            </p>
           </div>
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="shrink-0 rounded-[var(--radius-ctl)] bg-brand px-4 py-2.5 text-[14px] font-semibold text-brand-ink"
+          >
+            {open ? "Avbryt" : "Nytt kvitto"}
+          </button>
         </div>
+      </section>
+
+      {open && (
+        <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <ReceiptCapture onSaved={() => { setOpen(false); load(); }} />
+        </section>
       )}
 
-      <div className="card" style={{ padding: 0 }}>
-        {loading ? <div className="empty">Laddar...</div> : list.length === 0 ? (
-          <div className="empty">Inga kvitton ännu — scanna ditt första.</div>
+      {/* Law 05 — the queue, with verbs. Absent entirely when there is nothing to do. */}
+      {needsFx.length > 0 && (
+        <section className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-crit">Åtgärda</span>
+            <h2 className="text-[13.5px] font-medium text-crit">Saknar SEK-kurs</h2>
+          </div>
+          <p className="text-[13px] leading-relaxed text-ink-2">
+            {num(needsFx.length)} {needsFx.length === 1 ? "kvitto" : "kvitton"} i utländsk valuta är
+            inte omräknade. De räknas inte med i momsdeklarationen förrän de är det, så perioden
+            blir för låg.
+          </p>
+          <p className="mt-2 font-mono text-[11.5px] text-ink-3">node scripts/backfill-fx.mjs --write</p>
+        </section>
+      )}
+
+      {untreated.length > 0 && (
+        <section className="rounded-[var(--radius-card)] border border-warn/35 bg-warn-bg p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-warn">Granska</span>
+            <h2 className="text-[13.5px] font-medium text-warn">Momsbehandling saknas</h2>
+          </div>
+          <p className="text-[13px] leading-relaxed text-ink-2">
+            {num(untreated.length)} {untreated.length === 1 ? "kvitto" : "kvitton"} saknar
+            behandling. Utan den vet vi inte om momsen får dras av i ruta 48.
+          </p>
+        </section>
+      )}
+
+      {loadError && (
+        <section className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg p-4">
+          <p className="text-[13px] text-ink-2">
+            <span className="font-medium text-crit">Kunde inte hämta kvittona.</span>{" "}
+            {loadError}
+          </p>
+        </section>
+      )}
+
+      {/* The ledger */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-3 text-[15.5px] font-medium tracking-[-0.01em]">Kvitton</h2>
+
+        {loading ? (
+          <p className="py-10 text-center text-[13.5px] text-ink-3" role="status">Hämtar…</p>
+        ) : list.length === 0 ? (
+          <div className="py-12 text-center">
+            <p className="text-[14px] text-ink-2">Inga kvitton än.</p>
+            <p className="mx-auto mt-1.5 max-w-[38ch] text-[13px] leading-relaxed text-ink-3">
+              Fotografera det första — vi sparar bilden och en kontrollsumma, så att den
+              går att bevisa oförändrad.
+            </p>
+          </div>
         ) : (
-          <div className="table-wrap">
-            <table className="table table-stack">
-              <thead><tr><th>Datum</th><th>Leverantör</th><th>Kategori</th><th>BAS</th><th className="num">Moms</th><th className="num">Total</th><th>Status</th></tr></thead>
-              <tbody>
-                {list.map((r) => (
-                  <tr key={r.id}>
-                    <td data-label="Datum">{r.receipt_date}</td>
-                    <td data-label="Leverantör">{r.vendor}</td>
-                    <td data-label="Kategori" className="muted">{r.category}</td>
-                    <td data-label="BAS" className="muted">{r.bas_account}</td>
-                    <td data-label="Moms" className="num">{fmt(r.vat_amount)}</td>
-                    <td data-label="Total" className="num">{fmt(r.total)} {r.currency || "SEK"}</td>
-                    <td data-label="Status"><span className={`badge badge-${r.status === "approved" ? "paid" : "review"}`}>{r.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col">
+            {list.map((r) => {
+              const t = TREATMENT[r.vat_treatment];
+              const missingFx = r.currency !== "SEK" && r.total_sek == null;
+              const v = resolveVendor(r.vendor);
+              const amount = money(r.total, { decimals: 2, currency: r.currency || "SEK" });
+              const isOpen = expanded === r.id;
+              return (
+                <div key={r.id} className="border-b border-border last:border-b-0">
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : r.id)}
+                    aria-expanded={isOpen}
+                    className="grid w-full grid-cols-[1fr_auto] items-start gap-3 py-3 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[14px] font-medium text-ink">
+                        {v.name}
+                        {r.file_hash && <span className="ml-1.5 text-ink-3" title="Bilden finns sparad">·</span>}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-[11.5px] text-ink-3">
+                        {dateISO(r.receipt_date)}
+                        {v.via && <> · via {v.via}</>}
+                      </span>
+                      <span className="mt-1.5 flex flex-wrap gap-1.5">
+                        {t ? <Chip tone={t.tone}>{t.label}</Chip> : <Chip tone="warn">behandling saknas</Chip>}
+                        {missingFx && <Chip tone="crit">ingen SEK-kurs</Chip>}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="tnum block font-mono text-[14px] font-medium" lang="sv-SE" aria-label={amount.spoken}>
+                        {amount.text}
+                      </span>
+                      {r.currency !== "SEK" && !missingFx && (
+                        <span className="tnum mt-0.5 block font-mono text-[11px] text-ink-3">
+                          {money(r.total_sek, { decimals: 0 }).text}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+
+                  {/* Law 08 — density one tap down. Law 04 — the evidence is here. */}
+                  {isOpen && (
+                    <dl className="mb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-[var(--radius-ctl)] bg-raised p-3.5 text-[12.5px]">
+                      <dt className="micro-label pt-0.5">Moms</dt>
+                      <dd className="tnum font-mono text-ink-2">{money(r.vat_amount, { decimals: 2 }).text}</dd>
+
+                      <dt className="micro-label pt-0.5">Konto</dt>
+                      <dd className="font-mono text-ink-2">{r.bas_account || "–"}{r.ne_row ? ` · NE ${r.ne_row}` : ""}</dd>
+
+                      <dt className="micro-label pt-0.5">Verksamhet</dt>
+                      <dd className="text-ink-2">{r.venture || "–"}</dd>
+
+                      <dt className="micro-label pt-0.5">Andel affär</dt>
+                      <dd className="tnum font-mono text-ink-2">{r.business_share == null ? "–" : num(Number(r.business_share) * 100) + " %"}</dd>
+
+                      {r.description && (<>
+                        <dt className="micro-label pt-0.5">Vad</dt>
+                        <dd className="text-ink-2">{r.description}</dd>
+                      </>)}
+
+                      <dt className="micro-label pt-0.5">Verifikation</dt>
+                      <dd className="break-all font-mono text-[11px] text-ink-3">
+                        {r.file_hash ? `sha256 ${r.file_hash.slice(0, 16)}…` : "ingen fil sparad"}
+                      </dd>
+
+                      {r.uploaded_at && (<>
+                        <dt className="micro-label pt-0.5">Sparad</dt>
+                        <dd className="text-ink-2">{dateProse(r.uploaded_at)}</dd>
+                      </>)}
+                    </dl>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
-      </div>
-    </>
+      </section>
+
+      <p className="px-1 pb-2 text-[12px] leading-relaxed text-ink-3">
+        Belopp visas i kvittots egen valuta, med SEK-motvärdet under när det finns. Kurserna
+        hämtas från ECB på betalningsdagen. Kvitton utan kurs räknas inte med i någon period.
+      </p>
+    </div>
   );
 }

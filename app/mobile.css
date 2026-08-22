@@ -1,0 +1,115 @@
+/* app/mobile.css — the layer that stops this feeling like a website.
+ *
+ * Imported UNLAYERED by tailwind.css, so the platform guards below cannot be
+ * switched off by a stray utility class. The layout/chrome rules further down
+ * ARE wrapped in @layer legacy, so a Tailwind class can override them — that
+ * distinction is the whole point: `text-sm` must not be able to reintroduce
+ * the iOS input-zoom bug, but `h-8` must be able to make a button smaller.
+ *
+ * Every rule here is fixing something visible in the phone screenshots: the page
+ * scrolling sideways, the nav running off the edge, tap flashes, rubber-band bounce,
+ * and iOS zooming on inputs.
+ */
+
+/* ── 1. Kill horizontal overflow at the root ────────────────────────────────
+ * This was the actual bug. `overflow-x: clip` (not `hidden`) contains children
+ * without creating a scroll container, so `position: sticky` keeps working. */
+html {
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;   /* iOS must not reflow type on rotate */
+}
+body {
+  overflow-x: clip;
+  min-height: 100dvh;               /* dvh, never vh — vh is wrong under mobile chrome */
+}
+
+/* Nothing may be wider than the screen. The offenders were the chart panel and
+ * the venture switcher. */
+* { max-inline-size: 100%; }
+svg, img, video, canvas { max-width: 100%; height: auto; }
+
+/* ── 2. Native gestures ─────────────────────────────────────────────────── */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior: none;      /* no rubber-band, no pull-to-refresh in the app shell */
+  }
+}
+
+/* Horizontal scrollers keep their own scroll instead of chaining to the page. */
+[data-scroll-x] {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+[data-scroll-x]::-webkit-scrollbar { display: none; }
+
+/* ── 3. Touch feel ──────────────────────────────────────────────────────── */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* Chrome is not selectable; content is. Selecting a nav label by accident is the
+ * single most website-like thing a PWA does. */
+button, a, [role="button"], nav, .label, .micro-label { -webkit-user-select: none; user-select: none; }
+p, h1, h2, h3, td, th, .selectable { -webkit-user-select: text; user-select: text; }
+
+/* Apple's 44pt minimum. Small visual controls get their hit area back via a
+ * pseudo-element rather than by growing. */
+@layer legacy {
+  /* In the `legacy` layer, so `min-h-8` on a compact control wins. Unlayered
+   * (as it was) it beat every Tailwind sizing utility and no button could be
+   * made smaller — verified A/B: layered 32px, unlayered 44px.
+   * Note this is a FLOOR, not a height: plain `h-8` is still clamped to 44px
+   * because min-height beats height. Use `min-h-*` to go below the floor. */
+  button, a[role="button"], [role="tab"] { min-height: 44px; }
+}
+.hit-44 { position: relative; }
+.hit-44::after {
+  content: ""; position: absolute; inset: 50% 50% 50% 50%;
+  min-width: 44px; min-height: 44px; transform: translate(-50%, -50%);
+}
+
+/* ── 4. Inputs ──────────────────────────────────────────────────────────── */
+/* Below 16px iOS Safari zooms the whole page on focus and never zooms back. */
+input, select, textarea { font-size: max(16px, 1rem); }
+input[type="number"] { inputmode: decimal; }
+
+/* ── 5. Bottom chrome ───────────────────────────────────────────────────── */
+/* `sticky`, not `fixed`: WebKit bounces fixed elements during momentum scroll,
+ * and `position: fixed; bottom: 0` breaks outright with the keyboard open. */
+@layer legacy {
+.app-nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 40;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+}
+}
+/* .app-shell, .app-main and the safe-area padding are defined ONCE, in
+ * globals.css. They used to be declared here as well (flex column) and there as
+ * well (grid); globals.css was imported last and won, so this block was dead
+ * code — and its unlayered `padding-left: max(14px, ...)` would have clobbered
+ * the 32px desktop gutter had it ever been live. */
+
+/* ── 6. Typography that survives enlargement ────────────────────────────── */
+@layer legacy {
+.hero-figure {
+  font-size: clamp(38px, 13vw, 60px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;          /* a 7-figure number must wrap, not overflow */
+}
+}
+
+/* ── 7. Motion ──────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
