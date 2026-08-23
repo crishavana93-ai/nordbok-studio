@@ -7,7 +7,10 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint"
+    "lint": "next lint",
+    "arkiv": "node scripts/arkivera.mjs",
+    "import-kvitton": "node scripts/importera-kvitton.mjs",
+    "fx": "node scripts/backfill-fx.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
