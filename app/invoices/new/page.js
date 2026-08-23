@@ -227,7 +227,7 @@ export default function NewInvoice() {
           <form onSubmit={createClient} className="flex flex-col gap-3 rounded-[var(--radius-ctl)] bg-raised p-3.5">
             <Field label="Namn *"><input name="name" required className={inputCls} /></Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Kontaktperson"><input name="contact_name" className={inputCls} /></Field>
+              <Field label="Kontaktperson"><input name="contact_person" className={inputCls} /></Field>
               <Field label="E-post"><input name="email" type="email" className={inputCls} /></Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
