@@ -14,7 +14,10 @@ export async function GET(req) {
     const { data: invoice, error } = await sb.from("studio_invoices").select("*").eq("id", id).maybeSingle();
     if (error || !invoice) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const { data: client } = await sb.from("studio_clients").select("*").eq("id", invoice.client_id).maybeSingle();
-    const { data: settings } = await sb.from("studio_settings").select("*").maybeSingle();
+    /* The seller on an invoice is the invoice's owner — not necessarily the person
+       viewing it, now that a revisor can open someone else's books. */
+    const { data: settings } = await sb.from("studio_settings").select("*")
+      .eq("user_id", invoice.user_id).maybeSingle();
     const { data: items } = await sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position");
 
     const html = renderInvoiceHTML({ invoice, client, settings, items: items || [] });

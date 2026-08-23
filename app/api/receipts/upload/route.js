@@ -58,6 +58,7 @@ export async function POST(req) {
       .from("studio_receipts")
       .select("id, vendor, receipt_date, total, currency, storage_path")
       .eq("file_hash", hash)
+      .eq("user_id", user.id)
       .maybeSingle();
 
     if (existing) {

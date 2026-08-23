@@ -22,6 +22,8 @@ import { cookies } from "next/headers";
 import SwReg from "@/components/SwReg";
 import InstallPrompt from "@/components/InstallPrompt";
 import { serverClient } from "@/lib/supabase-server";
+import { getOwnerContext } from "@/lib/access";
+import OwnerSwitcher from "@/components/nav/OwnerSwitcher";
 
 export const viewport = {
   width: "device-width",
@@ -46,6 +48,8 @@ export default async function RootLayout({ children }) {
   const jar = await cookies();
   const locale = jar.get(LOCALE_COOKIE)?.value || DEFAULT_LOCALE;
   const { data: { user } } = await sb.auth.getUser();
+  // Only meaningful once a membership exists; OwnerSwitcher renders nothing for one owner.
+  const ownerCtx = user ? await getOwnerContext() : null;
 
   return (
     <html lang={locale} className={`${plexSans.variable} ${plexMono.variable}`}>
@@ -62,7 +66,10 @@ export default async function RootLayout({ children }) {
             <div className="hidden rail:contents">
               <Sidebar email={user.email} />
             </div>
-            <main className="app-main">{children}</main>
+            <main className="app-main">
+              <OwnerSwitcher owners={ownerCtx?.owners || []} activeId={ownerCtx?.activeId} />
+              {children}
+            </main>
             <div className="contents rail:hidden">
               <BottomNav />
             </div>

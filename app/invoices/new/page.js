@@ -37,7 +37,8 @@ export default function NewInvoice() {
 
   useEffect(() => {
     (async () => {
-      const { data: s } = await sb.from("studio_settings").select("*").maybeSingle();
+      const { data: { user: me } } = await sb.auth.getUser();
+      const { data: s } = await sb.from("studio_settings").select("*").eq("user_id", me.id).maybeSingle();
       setSettings(s);
       if (s?.default_currency) setCurrency(s.default_currency);
       const { data: c } = await sb.from("studio_clients").select("*").eq("archived", false).order("name");

@@ -7,6 +7,7 @@
 
 import Link from "next/link";
 import { serverClient } from "@/lib/supabase-server";
+import { getActiveOwnerId } from "@/lib/access";
 import { money, num, dateISO, daysPhrase } from "@/lib/format";
 
 export const metadata = { title: "Fakturor" };
@@ -33,9 +34,11 @@ const OPEN = new Set(["sent", "partially_paid", "overdue"]);
 
 export default async function Invoices() {
   const sb = await serverClient();
+  const ownerId = await getActiveOwnerId();
   const { data: invoices, error } = await sb
     .from("studio_invoices")
     .select("id, invoice_number, status, total, total_sek, issue_date, due_date, currency, client_id, studio_clients(name)")
+    .eq("user_id", ownerId)
     .order("issue_date", { ascending: false });
 
   if (error) console.error("[invoices]", error.message);

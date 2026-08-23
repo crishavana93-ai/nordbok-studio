@@ -173,7 +173,7 @@ export async function POST(req) {
       { data: settings }, { data: invoices }, { data: receipts },
       { data: trips }, { data: tasks }, { data: clients }, { data: history },
     ] = await Promise.all([
-      sb.from("studio_settings").select("*").maybeSingle(),
+      sb.from("studio_settings").select("*").eq("user_id", user.id).maybeSingle(),
       sb.from("studio_invoices")
         .select("invoice_number, status, total, vat_amount, subtotal, currency, issue_date, due_date, paid_at, venture, studio_clients(name)")
         .gte("issue_date", yearStart).order("issue_date", { ascending: false }).limit(60),

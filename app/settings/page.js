@@ -4,6 +4,7 @@ import { browserClient } from "@/lib/supabase";
 import { validPersonnummer, validOrgNr, buildVatNumber } from "@/lib/swedish-tax";
 import { CURRENCIES } from "@/lib/currency";
 import Tip from "@/components/Tip";
+import DeladAtkomst from "@/components/settings/DeladAtkomst";
 
 export default function SettingsPage() {
   const sb = useMemo(() => browserClient(), []);
@@ -18,9 +19,9 @@ export default function SettingsPage() {
     (async () => {
       const { data: { user } } = await sb.auth.getUser();
       setUser(user);
-      const { data: settings } = await sb.from("studio_settings").select("*").maybeSingle();
+      const { data: settings } = await sb.from("studio_settings").select("*").eq("user_id", user.id).maybeSingle();
       setS(settings || { user_id: user.id, default_vat_rate: 25, default_payment_terms_days: 30, f_skatt_approved: true });
-      const { data: prefs } = await sb.from("studio_notif_prefs").select("*").maybeSingle();
+      const { data: prefs } = await sb.from("studio_notif_prefs").select("*").eq("user_id", user.id).maybeSingle();
       setN(prefs || { user_id: user.id, email_digest: true, email_deadlines: true, email_invoice_paid: true, email_invoice_overdue: true, digest_day: 1, digest_hour: 8 });
     })();
   }, [sb]);
@@ -120,6 +121,11 @@ export default function SettingsPage() {
 
         <button className="btn" type="submit" disabled={busy}>{busy ? "Sparar..." : "Spara inställningar"}</button>
       </form>
+
+      {/* Outside the form on purpose: it has its own submit, and nesting forms is invalid. */}
+      <div style={{ marginTop: 18 }}>
+        <DeladAtkomst />
+      </div>
     </>
   );
 }

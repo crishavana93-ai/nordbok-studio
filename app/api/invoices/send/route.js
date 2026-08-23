@@ -34,7 +34,7 @@ export async function POST(req) {
 
     const [{ data: invoice }, { data: settings }] = await Promise.all([
       sb.from("studio_invoices").select("*").eq("id", invoice_id).maybeSingle(),
-      sb.from("studio_settings").select("*").maybeSingle(),
+      sb.from("studio_settings").select("*").eq("user_id", user.id).maybeSingle(),
     ]);
     if (!invoice) return NextResponse.json({ error: "Fakturan hittades inte." }, { status: 404 });
 

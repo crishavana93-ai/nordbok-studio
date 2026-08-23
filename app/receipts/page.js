@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { browserClient } from "@/lib/supabase";
 import ReceiptCapture from "@/components/receipts/ReceiptCapture";
 import { money, num, dateISO, dateProse } from "@/lib/format";
+import { readActiveOwnerId } from "@/lib/owner-client";
 
 const TREATMENT = {
   domestic:    { label: "Svensk moms",        tone: "good" },
@@ -71,9 +72,14 @@ export default function ReceiptsPage() {
 
   async function load() {
     setLoading(true);
+    /* Whose books. Without the filter, an accountant with access to a second set would
+       see both merged into one list and one total — see lib/access.js. */
+    const { data: { user } } = await sb.auth.getUser();
+    const ownerId = readActiveOwnerId(user?.id);
     const { data, error } = await sb
       .from("studio_receipts")
       .select("*")
+      .eq("user_id", ownerId)
       .order("receipt_date", { ascending: false })
       .limit(200);
     // Never swallow a Supabase {data, error} — this is the trap that cost a whole

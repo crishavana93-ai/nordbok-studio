@@ -56,7 +56,7 @@ export default async function InvoiceView({ params }) {
 
   const [{ data: items }, { data: settings }] = await Promise.all([
     sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position"),
-    sb.from("studio_settings").select("*").maybeSingle(),
+    sb.from("studio_settings").select("*").eq("user_id", inv.user_id).maybeSingle(),
   ]);
 
   const c = inv.studio_clients;
