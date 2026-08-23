@@ -1,9 +1,55 @@
 "use client";
+
+/* app/invoices/new/page.js — DIRECTION A · KONTOR
+ *
+ * THIS PAGE CREATES A DRAFT. IT CANNOT SEND ONE.
+ *
+ * What it used to do, and why each part was wrong:
+ *
+ *  1. It PREDICTED the invoice number in JavaScript — `bumpNumber(lastNumber)` — and
+ *     wrote it onto the draft. `next_invoice_number()` exists precisely so that a
+ *     number is allocated inside a single statement under a row lock, because Swedish
+ *     law requires an unbroken series. The send route only calls the allocator when the
+ *     invoice has no number yet, so writing a predicted one here meant **the atomic
+ *     allocator never ran**. Two tabs, or one double-click, produced two invoices
+ *     carrying the same number.
+ *  2. The number field was EDITABLE. A series you can type over is not a series.
+ *  3. The predicted format was `2026-001`; the database emits `2026-0001`. The very
+ *     first invoice would have been mis-formatted and the series table never initialised.
+ *  4. `status: send ? "sent" : "draft"` marked the row **sent before validation ran**.
+ *     If /api/invoices/send then rejected it as defective (422), the books were left
+ *     holding an invoice recorded as sent that had never been sent, with a number that
+ *     was never properly allocated.
+ *
+ * So: no number, no status choice, no send button. Save produces a draft and takes you
+ * to it, where ComplianceGate is the only route to "sent" — the same rule that fixed
+ * the bypass in app/invoices/[id]/actions.js. One door, and it is guarded.
+ */
+
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { browserClient } from "@/lib/supabase";
-import { computeInvoice, generateOcrNumber, ROTRUT_2026 } from "@/lib/swedish-tax";
-import { CURRENCIES, COUNTRIES, COUNTRY_TO_CURRENCY, EU_COUNTRIES, suggestVatRate, isReverseChargeCandidate, fmtMoney } from "@/lib/currency";
+import { computeInvoice, generateOcrNumber } from "@/lib/swedish-tax";
+import {
+  CURRENCIES, COUNTRIES, COUNTRY_TO_CURRENCY, EU_COUNTRIES,
+  suggestVatRate, isReverseChargeCandidate,
+} from "@/lib/currency";
+import { money, num, pct, dateISO } from "@/lib/format";
+
+const VAT_RATES = [25, 12, 6, 0];
+
+const inputCls =
+  "w-full rounded-[var(--radius-ctl)] border border-border bg-surface px-3 py-2.5 text-[16px] text-ink";
+
+function Field({ label, hint, children }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="micro-label">{label}</span>
+      {children}
+      {hint && <span className="text-[11.5px] leading-relaxed text-ink-3">{hint}</span>}
+    </label>
+  );
+}
 
 export default function NewInvoice() {
   const router = useRouter();
@@ -13,12 +59,11 @@ export default function NewInvoice() {
 
   const [settings, setSettings] = useState(null);
   const [clients, setClients] = useState([]);
+  const [showNewClient, setShowNewClient] = useState(false);
 
-  // Form state
-  const today = new Date().toISOString().slice(0, 10);
-  const due30 = new Date(Date.now() + 30 * 86400 * 1000).toISOString().slice(0, 10);
+  const today = dateISO(new Date());
+  const due30 = dateISO(new Date(Date.now() + 30 * 86400 * 1000));
   const [client_id, setClientId] = useState("");
-  const [invoice_number, setInvoiceNumber] = useState("");
   const [issue_date, setIssueDate] = useState(today);
   const [due_date, setDueDate] = useState(due30);
   const [currency, setCurrency] = useState("SEK");
@@ -31,77 +76,70 @@ export default function NewInvoice() {
   const [items, setItems] = useState([
     { description: "", quantity: 1, unit: "st", unit_price: 0, vat_rate: 25, rot_rut_hours: "" },
   ]);
-  const [newClient, setNewClient] = useState(null);
 
   const selectedClient = clients.find((c) => c.id === client_id);
 
   useEffect(() => {
     (async () => {
       const { data: { user: me } } = await sb.auth.getUser();
+      if (!me) return;
       const { data: s } = await sb.from("studio_settings").select("*").eq("user_id", me.id).maybeSingle();
       setSettings(s);
       if (s?.default_currency) setCurrency(s.default_currency);
-      const { data: c } = await sb.from("studio_clients").select("*").eq("archived", false).order("name");
+      const { data: c } = await sb
+        .from("studio_clients").select("*").eq("user_id", me.id).eq("archived", false).order("name");
       setClients(c || []);
-      const { data: last } = await sb.from("studio_invoices").select("invoice_number").order("created_at", { ascending: false }).limit(1);
-      const nextNum = last && last[0] ? bumpNumber(last[0].invoice_number) : `${new Date().getFullYear()}-001`;
-      setInvoiceNumber(nextNum);
     })();
   }, [sb]);
 
-  // When client changes, suggest currency, VAT rate, reverse-charge, language
+  /* Defaults cascade from the customer — country decides currency, VAT rate,
+   * reverse charge and language. Typing them again for every invoice is how a form
+   * becomes a chore. */
   useEffect(() => {
     if (!selectedClient) return;
     const country = selectedClient.country_code || "SE";
-    const cur = selectedClient.preferred_currency || COUNTRY_TO_CURRENCY[country] || "SEK";
-    setCurrency(cur);
-    const isB2B = !!selectedClient.org_nr || !!selectedClient.vat_number;
+    setCurrency(selectedClient.preferred_currency || COUNTRY_TO_CURRENCY[country] || "SEK");
+    const isB2B = Boolean(selectedClient.org_nr || selectedClient.vat_number);
     const rc = isReverseChargeCandidate({ country, vatNumber: selectedClient.vat_number });
     setReverseCharge(rc);
     const sug = suggestVatRate({ country, isBusiness: isB2B, vatNumber: selectedClient.vat_number });
     setItems((arr) => arr.map((it) => ({ ...it, vat_rate: sug })));
     if (selectedClient.language) setLanguage(selectedClient.language);
-    if (country !== "SE" && EU_COUNTRIES.has(country) && !rc) setOssCountry(country);
-    else setOssCountry("");
+    setOssCountry(country !== "SE" && EU_COUNTRIES.has(country) && !rc ? country : "");
   }, [selectedClient]);
-
-  function bumpNumber(s) {
-    const m = String(s).match(/^(.*?)(\d+)$/);
-    if (!m) return `${s}-002`;
-    const next = String(Number(m[2]) + 1).padStart(m[2].length, "0");
-    return m[1] + next;
-  }
 
   const computed = useMemo(
     () => computeInvoice(items, { rot_rut_type, reverse_charge }),
     [items, rot_rut_type, reverse_charge]
   );
 
-  const updateItem = (i, patch) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const addItem = () => setItems((arr) => [...arr, { description: "", quantity: 1, unit: "st", unit_price: 0, vat_rate: items[0]?.vat_rate ?? 25, rot_rut_hours: "" }]);
+  const updateItem = (i, patch) =>
+    setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const addItem = () =>
+    setItems((arr) => [...arr, {
+      description: "", quantity: 1, unit: "st", unit_price: 0,
+      vat_rate: items[0]?.vat_rate ?? 25, rot_rut_hours: "",
+    }]);
   const removeItem = (i) => setItems((arr) => arr.filter((_, idx) => idx !== i));
 
-  async function save(send = false) {
+  async function saveDraft() {
     setErr(""); setBusy(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) throw new Error("Du är inte inloggad.");
-      if (!settings?.business_name) throw new Error("Fyll först in företagsuppgifter under Inställningar.");
+      if (!settings?.business_name) throw new Error("Fyll först i företagsuppgifter under Inställningar.");
       if (!client_id) throw new Error("Välj eller skapa en kund.");
-      if (items.length === 0 || !items[0].description) throw new Error("Lägg till minst en rad.");
+      if (!items.length || !items[0].description.trim()) throw new Error("Lägg till minst en rad.");
 
-      const ocr_number = generateOcrNumber(`${Date.now()}`);
       const inv = {
         user_id: user.id,
         client_id,
-        invoice_number,
-        status: send ? "sent" : "draft",
-        issue_date,
-        due_date,
-        reference,
-        ocr_number,
-        currency,
-        language,
+        /* No invoice_number. next_invoice_number() allocates it at send time, under a
+         * row lock, so the series can never gap or collide. Do not set it here. */
+        status: "draft",
+        issue_date, due_date, reference,
+        ocr_number: generateOcrNumber(`${Date.now()}`),
+        currency, language,
         subtotal: computed.subtotal,
         vat_amount: computed.vat_amount,
         total: computed.total,
@@ -110,16 +148,15 @@ export default function NewInvoice() {
         rot_rut_type: rot_rut_type || null,
         reverse_charge,
         oss_country: oss_country || null,
-        payment_terms_days: Math.max(0, Math.ceil((new Date(due_date) - new Date(issue_date)) / 86400000)),
+        payment_terms_days: Math.max(0, Math.round((new Date(due_date) - new Date(issue_date)) / 86400000)),
         notes,
       };
+
       const { data: inserted, error } = await sb.from("studio_invoices").insert(inv).select().single();
       if (error) throw error;
 
       const itemRows = items.map((it, position) => ({
-        invoice_id: inserted.id,
-        user_id: user.id,
-        position,
+        invoice_id: inserted.id, user_id: user.id, position,
         description: it.description,
         quantity: Number(it.quantity || 0),
         unit: it.unit || "st",
@@ -130,216 +167,266 @@ export default function NewInvoice() {
       const { error: e2 } = await sb.from("studio_invoice_items").insert(itemRows);
       if (e2) throw e2;
 
-      if (send) {
-        const r = await fetch("/api/invoices/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ invoice_id: inserted.id }),
-        });
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}));
-          throw new Error(j.error || "Kunde inte skicka faktura.");
-        }
-      }
       router.push(`/invoices/${inserted.id}`);
       router.refresh();
     } catch (e) {
       setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function createClient(e) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const payload = Object.fromEntries(f);
+    setErr("");
+    const payload = Object.fromEntries(new FormData(e.currentTarget));
     payload.country_code = (payload.country_code || "SE").toUpperCase();
     const { data: { user } } = await sb.auth.getUser();
     payload.user_id = user.id;
     const { data, error } = await sb.from("studio_clients").insert(payload).select().single();
     if (error) { setErr(error.message); return; }
-    setClients([...clients, data]);
+    setClients((c) => [...c, data]);
     setClientId(data.id);
-    setNewClient(null);
+    setShowNewClient(false);
   }
 
   const isSE = (selectedClient?.country_code || "SE") === "SE";
-  const supportsRotRut = isSE; // ROT/RUT is Sweden-only
 
   return (
-    <>
-      <div className="spread" style={{ marginBottom: 16 }}>
-        <h1 className="h1">Ny faktura</h1>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+      <div>
+        <h1 className="text-[21px] font-medium tracking-[-0.015em]">Ny faktura</h1>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+          Det här skapar ett utkast. Fakturanumret tilldelas först när du skickar, så
+          serien aldrig får luckor.
+        </p>
       </div>
-      {err && <div className="alert alert-error">{err}</div>}
 
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "1fr" }} className="invoice-layout">
-        {/* ─── LEFT: form ─── */}
-        <div className="card">
-          <h2 className="h2" style={{ marginTop: 0 }}>Kund</h2>
-          {!newClient ? (
-            <div className="row" style={{ flexWrap: "nowrap" }}>
-              <select className="select" value={client_id} onChange={(e) => setClientId(e.target.value)} style={{ flex: 1 }}>
-                <option value="">— Välj kund —</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.country_code !== "SE" ? ` (${c.country_code})` : ""}</option>)}
-              </select>
-              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setNewClient({})}>+ Ny</button>
-            </div>
-          ) : (
-            <form onSubmit={createClient} style={{ background: "var(--bg-soft)", padding: 12, borderRadius: 9 }}>
-              <div className="grid-2">
-                <div className="field"><label className="label">Namn *</label><input className="input" name="name" required /></div>
-                <div className="field"><label className="label">Kontaktperson</label><input className="input" name="contact_person" /></div>
-                <div className="field"><label className="label">E-post</label><input className="input" name="email" type="email" /></div>
-                <div className="field"><label className="label">Land</label>
-                  <select className="select" name="country_code" defaultValue="SE">
-                    {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
-                  </select>
-                </div>
-                <div className="field"><label className="label">Org-nr / Personnr / Tax ID</label><input className="input" name="org_nr" placeholder="SE: pers/orgnr · UK: company nr · US: EIN" /></div>
-                <div className="field"><label className="label">VAT-nummer (EU)</label><input className="input" name="vat_number" placeholder="GB123456789, DE123456789..." /></div>
-                <div className="field"><label className="label">Föredragen valuta</label>
-                  <select className="select" name="preferred_currency" defaultValue="">
-                    <option value="">Auto (från land)</option>
-                    {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
-                  </select>
-                </div>
-                <div className="field"><label className="label">Språk</label>
-                  <select className="select" name="language" defaultValue="sv">
-                    <option value="sv">Svenska</option><option value="en">English</option>
-                  </select>
-                </div>
-                <div className="field" style={{ gridColumn: "1/-1" }}><label className="label">Adress</label><input className="input" name="address_street" /></div>
-                <div className="field"><label className="label">Postnr/ZIP</label><input className="input" name="address_zip" /></div>
-                <div className="field"><label className="label">Ort/City</label><input className="input" name="address_city" /></div>
-                <div className="field"><label className="label">Fastighetsbeteckning (ROT)</label><input className="input" name="fastighetsbeteckning" /></div>
-                <div className="field"><label className="label">BRF org-nr (RUT)</label><input className="input" name="brf_org_nr" /></div>
-              </div>
-              <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
-                <button className="btn btn-ghost btn-sm" type="button" onClick={() => setNewClient(null)}>Avbryt</button>
-                <button className="btn btn-sm" type="submit">Spara kund</button>
-              </div>
-            </form>
-          )}
+      {err && (
+        <p className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg px-4 py-3 text-[13px] text-ink-2">{err}</p>
+      )}
 
-          <h2 className="h2">Faktura</h2>
-          <div className="grid-2">
-            <div className="field"><label className="label">Fakturanummer</label><input className="input" value={invoice_number} onChange={(e) => setInvoiceNumber(e.target.value)} /></div>
-            <div className="field"><label className="label">Referens (kundens)</label><input className="input" value={reference} onChange={(e) => setReference(e.target.value)} /></div>
-            <div className="field"><label className="label">Fakturadatum</label><input className="input" type="date" value={issue_date} onChange={(e) => setIssueDate(e.target.value)} /></div>
-            <div className="field"><label className="label">Förfallodatum</label><input className="input" type="date" value={due_date} onChange={(e) => setDueDate(e.target.value)} /></div>
-            <div className="field"><label className="label">Valuta</label>
-              <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
-              </select>
-            </div>
-            <div className="field"><label className="label">Språk på faktura</label>
-              <select className="select" value={language} onChange={(e) => setLanguage(e.target.value)}>
-                <option value="sv">Svenska</option><option value="en">English</option>
-              </select>
-            </div>
-          </div>
+      {/* ── Kund ── */}
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Kund</h2>
+        <Field label="Välj kund">
+          <select className={inputCls} value={client_id} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">Välj…</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.country_code && c.country_code !== "SE" ? ` · ${c.country_code}` : ""}</option>
+            ))}
+          </select>
+        </Field>
 
-          <details style={{ marginTop: 4, marginBottom: 14 }}>
-            <summary style={{ fontWeight: 600, cursor: "pointer", padding: "6px 0" }}>Avancerat (ROT/RUT, omvänd skattskyldighet, OSS)</summary>
-            <div className="grid-2" style={{ marginTop: 8 }}>
-              <div className="field">
-                <label className="label">ROT/RUT-arbete {!supportsRotRut && <span className="muted">(endast SE)</span>}</label>
-                <select className="select" value={rot_rut_type} onChange={(e) => setRotRutType(e.target.value)} disabled={!supportsRotRut}>
-                  <option value="">— Inget —</option>
-                  <option value="ROT">ROT (max 50 000 kr/år)</option>
-                  <option value="RUT">RUT (max 75 000 kr/år)</option>
+        <button
+          type="button" onClick={() => setShowNewClient((v) => !v)}
+          className="self-start rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 font-mono text-[11.5px] font-medium text-ink-2 hover:text-ink"
+        >
+          {showNewClient ? "Avbryt" : "Ny kund"}
+        </button>
+
+        {showNewClient && (
+          <form onSubmit={createClient} className="flex flex-col gap-3 rounded-[var(--radius-ctl)] bg-raised p-3.5">
+            <Field label="Namn *"><input name="name" required className={inputCls} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Kontaktperson"><input name="contact_name" className={inputCls} /></Field>
+              <Field label="E-post"><input name="email" type="email" className={inputCls} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Land">
+                <select name="country_code" defaultValue="SE" className={inputCls}>
+                  {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
                 </select>
-              </div>
-              <div className="field">
-                <label className="label">Omvänd skattskyldighet</label>
-                <select className="select" value={reverse_charge ? "1" : "0"} onChange={(e) => setReverseCharge(e.target.value === "1")}>
-                  <option value="0">Nej</option>
-                  <option value="1">Ja (B2B EU/byggsektor — köparen redovisar moms)</option>
+              </Field>
+              <Field label="Föredragen valuta">
+                <select name="preferred_currency" defaultValue="SEK" className={inputCls}>
+                  {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
                 </select>
-              </div>
-              <div className="field">
-                <label className="label">OSS-destinationsland (B2C EU)</label>
-                <select className="select" value={oss_country} onChange={(e) => setOssCountry(e.target.value)}>
-                  <option value="">— Ingen —</option>
-                  {COUNTRIES.filter((c) => EU_COUNTRIES.has(c.code) && c.code !== "SE").map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                </select>
-              </div>
+              </Field>
             </div>
-          </details>
-
-          <h2 className="h2">Rader</h2>
-          {items.map((it, i) => (
-            <div key={i} style={{ background: "var(--bg-soft)", padding: 12, borderRadius: 10, marginBottom: 10 }}>
-              <div className="field"><label className="label">Beskrivning</label><input className="input" value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Tjänst eller vara" /></div>
-              <div className="grid-4">
-                <div className="field"><label className="label">Antal</label><input className="input num" inputMode="decimal" type="number" step="0.01" value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} /></div>
-                <div className="field"><label className="label">Enhet</label><input className="input" value={it.unit} onChange={(e) => updateItem(i, { unit: e.target.value })} /></div>
-                <div className="field"><label className="label">À-pris (excl. moms)</label><input className="input num" inputMode="decimal" type="number" step="0.01" value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} /></div>
-                <div className="field"><label className="label">Moms %</label>
-                  <select className="select" value={it.vat_rate} onChange={(e) => updateItem(i, { vat_rate: e.target.value })}>
-                    <option value="25">25</option><option value="12">12</option><option value="6">6</option><option value="0">0</option>
-                  </select>
-                </div>
-              </div>
-              {rot_rut_type && supportsRotRut && (
-                <div className="field"><label className="label">Arbetstimmar (ROT/RUT)</label><input className="input" inputMode="decimal" type="number" step="0.5" value={it.rot_rut_hours} onChange={(e) => updateItem(i, { rot_rut_hours: e.target.value })} placeholder="Endast arbetskostnad — material räknas inte" /></div>
-              )}
-              <div className="row" style={{ justifyContent: "flex-end" }}>
-                <button className="btn btn-ghost btn-sm" type="button" onClick={() => removeItem(i)} disabled={items.length === 1}>Ta bort rad</button>
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Org-nr / Personnr"><input name="org_nr" className={inputCls} /></Field>
+              <Field label="VAT-nummer (EU)" hint="Krävs för omvänd skattskyldighet inom EU.">
+                <input name="vat_number" className={inputCls} />
+              </Field>
             </div>
-          ))}
-          <button className="btn btn-ghost btn-sm" type="button" onClick={addItem}>+ Lägg till rad</button>
+            <Field label="Adress"><input name="address_street" className={inputCls} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Postnr"><input name="address_zip" className={inputCls} /></Field>
+              <Field label="Ort"><input name="address_city" className={inputCls} /></Field>
+            </div>
+            <button type="submit" className="self-start rounded-[var(--radius-ctl)] bg-brand px-4 py-2.5 text-[14px] font-semibold text-brand-ink">
+              Spara kund
+            </button>
+          </form>
+        )}
+      </section>
 
-          <h2 className="h2">Anteckningar (visas på fakturan)</h2>
-          <textarea className="textarea" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      {/* ── Faktura ── */}
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Faktura</h2>
+
+        <div className="rounded-[var(--radius-ctl)] bg-raised px-3.5 py-3">
+          <span className="micro-label">Fakturanummer</span>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+            Tilldelas av databasen när fakturan skickas — nästa lediga i serien
+            <span className="font-mono"> {new Date().getFullYear()}-NNNN</span>. Det går
+            inte att välja själv, och det är avsiktligt: en nummerserie du kan skriva
+            över är ingen nummerserie.
+          </p>
         </div>
 
-        {/* ─── RIGHT: live summary ─── */}
-        <div>
-          <div className="card sticky-side">
-            <h2 className="h2" style={{ marginTop: 0 }}>Sammanställning</h2>
-            <div className="table-wrap">
-              <table className="table">
-                <tbody>
-                  <tr><td>Delsumma</td><td className="num">{fmtMoney(computed.subtotal, currency)}</td></tr>
-                  <tr><td>Moms</td><td className="num">{fmtMoney(computed.vat_amount, currency)}</td></tr>
-                  {computed.rot_amount > 0 && <tr><td>ROT-avdrag (skv)</td><td className="num">−{fmtMoney(computed.rot_amount, currency)}</td></tr>}
-                  {computed.rut_amount > 0 && <tr><td>RUT-avdrag (skv)</td><td className="num">−{fmtMoney(computed.rut_amount, currency)}</td></tr>}
-                  <tr><td style={{ fontWeight: 700 }}>Att betala</td><td className="num" style={{ fontWeight: 700, fontSize: 17 }}>{fmtMoney(computed.total, currency)}</td></tr>
-                </tbody>
-              </table>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Fakturadatum">
+            <input type="date" className={inputCls} value={issue_date} onChange={(e) => setIssueDate(e.target.value)} />
+          </Field>
+          <Field label="Förfallodatum">
+            <input type="date" className={inputCls} value={due_date} onChange={(e) => setDueDate(e.target.value)} />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Valuta">
+            <select className={inputCls} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
+            </select>
+          </Field>
+          <Field label="Språk på fakturan">
+            <select className={inputCls} value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="sv">Svenska</option>
+              <option value="en">English</option>
+            </select>
+          </Field>
+        </div>
+
+        <Field label="Kundens referens"><input className={inputCls} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={`ROT/RUT-arbete${isSE ? "" : " (endast Sverige)"}`}>
+            <select className={inputCls} value={rot_rut_type} disabled={!isSE}
+              onChange={(e) => setRotRutType(e.target.value)}>
+              <option value="">Nej</option>
+              <option value="ROT">ROT</option>
+              <option value="RUT">RUT</option>
+            </select>
+          </Field>
+          <Field label="OSS-destinationsland (B2C EU)">
+            <select className={inputCls} value={oss_country} onChange={(e) => setOssCountry(e.target.value)}>
+              <option value="">—</option>
+              {COUNTRIES.filter((c) => EU_COUNTRIES.has(c.code)).map((c) => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <label className="flex items-start gap-2.5">
+          <input type="checkbox" checked={reverse_charge} onChange={(e) => setReverseCharge(e.target.checked)}
+            className="mt-0.5 size-4" />
+          <span className="text-[13.5px] leading-relaxed text-ink-2">
+            <span className="font-medium text-ink">Omvänd skattskyldighet.</span> Ingen moms
+            debiteras; köparen redovisar den. Kräver kundens VAT-nummer på fakturan.
+          </span>
+        </label>
+      </section>
+
+      {/* ── Rader ── */}
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Rader</h2>
+
+        {items.map((it, i) => (
+          <div key={i} className="flex flex-col gap-3 border-b border-border pb-4 last:border-b-0 last:pb-0">
+            <Field label={`Rad ${i + 1}`}>
+              <input className={inputCls} value={it.description} placeholder="Tjänst eller vara"
+                onChange={(e) => updateItem(i, { description: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Field label="Antal">
+                <input type="number" step="0.01" className={inputCls} value={it.quantity}
+                  onChange={(e) => updateItem(i, { quantity: e.target.value })} />
+              </Field>
+              <Field label="Enhet">
+                <input className={inputCls} value={it.unit} onChange={(e) => updateItem(i, { unit: e.target.value })} />
+              </Field>
+              <Field label="À-pris exkl. moms">
+                <input type="number" step="0.01" className={inputCls} value={it.unit_price}
+                  onChange={(e) => updateItem(i, { unit_price: e.target.value })} />
+              </Field>
+              <Field label="Moms">
+                <select className={inputCls} value={it.vat_rate}
+                  onChange={(e) => updateItem(i, { vat_rate: Number(e.target.value) })}>
+                  {VAT_RATES.map((r) => <option key={r} value={r}>{pct(r)}</option>)}
+                </select>
+              </Field>
             </div>
-            {reverse_charge && <div className="alert alert-info" style={{ marginTop: 10 }}>Omvänd skattskyldighet — texten "Reverse charge — buyer accounts for VAT" läggs till på PDF.</div>}
-            {oss_country && <div className="alert alert-info" style={{ marginTop: 10 }}>OSS-försäljning till {oss_country}. Säkerställ att din OSS-registrering är aktiv hos Skatteverket om du passerat 99 680 kr i EU-B2C.</div>}
-            {rot_rut_type && supportsRotRut && (rot_rut_type === "ROT" ? computed.rot_amount === 0 : computed.rut_amount === 0) && (
-              <div className="alert alert-error" style={{ marginTop: 10 }}>Ingen {rot_rut_type}-grund — fyll i arbetstimmar på minst en rad.</div>
+            {rot_rut_type && (
+              <Field label="Arbetstimmar" hint="Endast arbetskostnad ger ROT/RUT — material räknas inte.">
+                <input type="number" step="0.5" className={inputCls} value={it.rot_rut_hours}
+                  onChange={(e) => updateItem(i, { rot_rut_hours: e.target.value })} />
+              </Field>
             )}
-
-            <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-              <button className="btn btn-block" type="button" onClick={() => save(false)} disabled={busy}>
-                {busy ? "Sparar..." : "Spara som utkast"}
-              </button>
-              <button className="btn btn-ghost btn-block" type="button" onClick={() => save(true)} disabled={busy}>
-                Spara &amp; skicka via e-post
-              </button>
+            <div className="flex items-center justify-between gap-3">
+              <span className="tnum font-mono text-[13px] text-ink-2">
+                {money(Number(it.quantity || 0) * Number(it.unit_price || 0), { decimals: 2, currency }).text}
+              </span>
+              {items.length > 1 && (
+                <button type="button" onClick={() => removeItem(i)}
+                  className="rounded-[var(--radius-ctl)] border border-border-firm px-2.5 py-1 font-mono text-[11.5px] font-medium text-ink-2 hover:text-crit">
+                  Ta bort
+                </button>
+              )}
             </div>
           </div>
+        ))}
 
-          {!settings?.business_name && (
-            <div className="alert alert-error" style={{ marginTop: 12 }}>
-              Lägg först in dina företagsuppgifter under <a href="/settings" style={{ textDecoration: "underline" }}>Inställningar</a> (företagsnamn, personnr, F-skatt, IBAN).
-            </div>
-          )}
+        <button type="button" onClick={addItem}
+          className="self-start rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 font-mono text-[11.5px] font-medium text-ink-2 hover:text-ink">
+          Lägg till rad
+        </button>
+      </section>
+
+      {/* ── Summa ── */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <div className="flex justify-end">
+          <dl className="grid w-full max-w-[300px] grid-cols-[1fr_auto] gap-x-6 gap-y-1.5 text-[13.5px]">
+            <dt className="text-ink-2">Delsumma</dt>
+            <dd className="tnum text-right font-mono">{money(computed.subtotal, { decimals: 2, currency }).text}</dd>
+            <dt className="text-ink-2">Moms</dt>
+            <dd className="tnum text-right font-mono">{money(computed.vat_amount, { decimals: 2, currency }).text}</dd>
+            {computed.rot_amount > 0 && (<>
+              <dt className="text-ink-2">ROT-avdrag</dt>
+              <dd className="tnum text-right font-mono">{money(-computed.rot_amount, { decimals: 2, currency }).text}</dd>
+            </>)}
+            {computed.rut_amount > 0 && (<>
+              <dt className="text-ink-2">RUT-avdrag</dt>
+              <dd className="tnum text-right font-mono">{money(-computed.rut_amount, { decimals: 2, currency }).text}</dd>
+            </>)}
+            <dt className="mt-2 border-t-2 border-ink pt-2.5 text-[15px] font-medium text-ink">Att betala</dt>
+            <dd className="tnum mt-2 border-t-2 border-ink pt-2.5 text-right font-mono text-[17px] font-medium">
+              {money(computed.total, { decimals: 2, currency }).text}
+            </dd>
+          </dl>
         </div>
+      </section>
+
+      <Field label="Noteringar på fakturan">
+        <textarea rows={3} className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </Field>
+
+      <div className="flex flex-wrap gap-2.5">
+        <button onClick={saveDraft} disabled={busy}
+          className="rounded-[var(--radius-ctl)] bg-brand px-4 py-3 text-[14px] font-semibold text-brand-ink disabled:opacity-40">
+          {busy ? "Sparar…" : "Spara utkast"}
+        </button>
+        <button onClick={() => router.push("/invoices")} disabled={busy}
+          className="rounded-[var(--radius-ctl)] border border-border-firm px-4 py-3 text-[14px] font-medium text-ink-2">
+          Avbryt
+        </button>
       </div>
-      <style jsx>{`
-        @media (min-width: 1000px) {
-          .invoice-layout { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
-        }
-      `}</style>
-    </>
+
+      <p className="px-1 pb-2 text-[12px] leading-relaxed text-ink-3">
+        Nästa steg är granskning: när du sparat öppnas fakturan, och där kontrolleras den
+        mot mervärdesskattelagen 17 kap. innan den kan skickas. Först då tilldelas
+        fakturanumret.
+      </p>
+    </div>
   );
 }
