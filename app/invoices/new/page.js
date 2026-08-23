@@ -35,6 +35,7 @@ import {
   suggestVatRate, isReverseChargeCandidate,
 } from "@/lib/currency";
 import { money, num, pct, dateISO } from "@/lib/format";
+import { sellerIdentity } from "@/lib/seller";
 
 const VAT_RATES = [25, 12, 6, 0];
 
@@ -59,6 +60,8 @@ export default function NewInvoice() {
 
   const [settings, setSettings] = useState(null);
   const [clients, setClients] = useState([]);
+  const [ventures, setVentures] = useState([]);
+  const [venture, setVenture] = useState("");
   const [showNewClient, setShowNewClient] = useState(false);
 
   const today = dateISO(new Date());
@@ -78,6 +81,8 @@ export default function NewInvoice() {
   ]);
 
   const selectedClient = clients.find((c) => c.id === client_id);
+  const selectedVenture = ventures.find((v) => v.venture === venture) || null;
+  const seller = sellerIdentity({ settings, venture: selectedVenture, lang: language });
 
   useEffect(() => {
     (async () => {
@@ -89,6 +94,13 @@ export default function NewInvoice() {
       const { data: c } = await sb
         .from("studio_clients").select("*").eq("user_id", me.id).eq("archived", false).order("name");
       setClients(c || []);
+      const { data: v } = await sb
+        .from("studio_venture_identity").select("*").eq("user_id", me.id).order("display_name");
+      setVentures(v || []);
+      /* Default to the registered main name. Choosing nothing must never mean
+         "invoice under an unregistered brand". */
+      const primary = (v || []).find((x) => x.name_type === "primary");
+      if (primary) setVenture(primary.venture);
     })();
   }, [sb]);
 
@@ -137,6 +149,7 @@ export default function NewInvoice() {
         /* No invoice_number. next_invoice_number() allocates it at send time, under a
          * row lock, so the series can never gap or collide. Do not set it here. */
         status: "draft",
+      venture: venture || null,
         issue_date, due_date, reference,
         ocr_number: generateOcrNumber(`${Date.now()}`),
         currency, language,
@@ -204,35 +217,76 @@ export default function NewInvoice() {
         <p className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg px-4 py-3 text-[13px] text-ink-2">{err}</p>
       )}
 
-      {/* ── Fran ──────────────────────────────────────────────────────────────
-          The seller. This form asked for the customer, the lines and the VAT, and
-          never once said who the invoice was FROM -- so there was no way to notice
-          from inside the app that the name at the top was the old one. After the
-          Bolagsverket rename that is exactly the field worth showing. */}
-      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <span className="micro-label">Från</span>
-            <div className="mt-1 truncate text-[15.5px] font-medium tracking-[-0.01em]">
-              {settings?.business_name || "Ingen verksamhet namngiven"}
-            </div>
-            <div className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
-              {[
-                settings?.vat_number ? `Moms-nr ${settings.vat_number}` : "Moms-nr saknas",
-                settings?.f_skatt_approved ? "Godkänd för F-skatt" : "F-skatt ej angiven",
-                settings?.bankgiro
-                  ? `Bankgiro ${settings.bankgiro}`
-                  : settings?.iban ? `IBAN ${settings.iban}` : "Inget betalsätt angivet",
-              ].join(" · ")}
-            </div>
-          </div>
-          <a
-            href="/settings"
-            className="shrink-0 rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 font-mono text-[11.5px] font-medium text-ink-2 hover:text-ink"
-          >
+      {/* ── Från ──────────────────────────────────────────────────────────────
+          The seller, and the one field on this form with legal consequences for
+          somebody else. Skatteverket's position is that the name here must be a
+          registered företagsnamn -- or, if none is registered, the person's own name.
+          A brand may sit beside it; it may never replace it. So the picker below
+          chooses which VENTURE the work was done under, and lib/seller.js decides
+          whether that name is allowed to head the invoice or has to appear as a
+          reference line underneath. The preview shows the outcome before you save,
+          because the alternative is finding out from your customer's bookkeeper. */}
+      <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Från</h2>
+          <a href="/settings"
+            className="rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 font-mono text-[11.5px] font-medium text-ink-2 hover:text-ink">
             Ändra
           </a>
         </div>
+
+        {ventures.length > 0 && (
+          <Field
+            label="Verksamhet"
+            hint={
+              selectedVenture?.name_type === "brand"
+                ? "Varumärket är inte registrerat, så det står som referens på fakturan — säljaren förblir det registrerade namnet."
+                : selectedVenture?.name_type === "sarskilt"
+                ? "Särskilt företagsnamn: både det och verksamhetens huvudnamn måste visas, så båda skrivs ut."
+                : "Registrerat företagsnamn — står som säljare på fakturan."
+            }
+          >
+            <select className={inputCls} value={venture} onChange={(e) => setVenture(e.target.value)}>
+              <option value="">Registrerat huvudnamn</option>
+              {ventures.map((v) => (
+                <option key={v.venture} value={v.venture}>
+                  {v.display_name}{v.name_type === "brand" ? " · varumärke" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        <div className="rounded-[var(--radius-ctl)] bg-raised p-3.5">
+          <span className="micro-label">Så här står det på fakturan</span>
+          <div className="mt-1.5 text-[15.5px] font-medium tracking-[-0.01em]">
+            {seller.headerName || "Ingen verksamhet namngiven"}
+          </div>
+          {seller.subLine && (
+            <div className="mt-0.5 text-[12.5px] text-ink-2">{seller.subLine}</div>
+          )}
+          {seller.brandLine && (
+            <div className="mt-1 font-mono text-[12px] text-ink-2">{seller.brandLine}</div>
+          )}
+          <div className="mt-1.5 text-[12.5px] leading-relaxed text-ink-3">
+            {[
+              settings?.vat_number ? `Moms-nr ${settings.vat_number}` : "Moms-nr saknas",
+              settings?.f_skatt_approved ? "Godkänd för F-skatt" : "F-skatt ej angiven",
+              settings?.bankgiro
+                ? `Bankgiro ${settings.bankgiro}`
+                : settings?.iban ? `IBAN ${settings.iban}` : "Inget betalsätt angivet",
+            ].join(" · ")}
+          </div>
+          <div className="mt-2 border-t border-border pt-2 font-mono text-[11.5px] text-ink-3">
+            Skickas från {seller.fromEmail || "ingen avsändaradress angiven"}
+          </div>
+        </div>
+
+        {seller.warning && (
+          <p className="rounded-[var(--radius-ctl)] bg-crit-bg px-3.5 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
+            {seller.warning}
+          </p>
+        )}
       </section>
 
       {/* ── Kund ── */}

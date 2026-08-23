@@ -23,6 +23,7 @@ import { Resend } from "resend";
 import { requireUser } from "@/lib/supabase-server";
 import { renderInvoiceHTML } from "@/lib/invoice-html";
 import { validateInvoice, vatBreakdown } from "@/lib/invoice-compliance";
+import { sellerIdentity } from "@/lib/seller";
 
 export const runtime = "nodejs";
 
@@ -47,9 +48,13 @@ export async function POST(req) {
       });
     }
 
-    const [{ data: client }, { data: items }] = await Promise.all([
+    const [{ data: client }, { data: items }, { data: venture }] = await Promise.all([
       sb.from("studio_clients").select("*").eq("id", invoice.client_id).maybeSingle(),
       sb.from("studio_invoice_items").select("*").eq("invoice_id", invoice_id).order("position"),
+      invoice.venture
+        ? sb.from("studio_venture_identity").select("*")
+            .eq("user_id", invoice.user_id).eq("venture", invoice.venture).maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
 
     if (!client?.email) {
@@ -93,7 +98,7 @@ export async function POST(req) {
     const frozen = bd.rows.map((r) => ({ rate: r.rate, net: r.net, vat: r.vat, gross: r.gross }));
 
     const sendable = { ...invoice, invoice_number: invoiceNumber, vat_breakdown: frozen };
-    const html = renderInvoiceHTML({ invoice: sendable, client, settings, items: items || [] });
+    const html = renderInvoiceHTML({ invoice: sendable, client, settings, items: items || [], venture });
 
     /* ── Email, in the invoice's own currency ──────────────────────────────── */
     const ccy = invoice.currency || "SEK";
@@ -102,10 +107,28 @@ export async function POST(req) {
     }).format(Number(invoice.total) || 0);
 
     const resend = new Resend(process.env.RESEND_API_KEY);
-    const fromName = settings?.business_name || "Nordbok Studio";
-    const fromEmail =
-      process.env.RESEND_FROM_EMAIL ||
-      `Studio <faktura@${(process.env.NEXT_PUBLIC_APP_URL || "nordbok.app").replace(/^https?:\/\//, "").split("/")[0]}>`;
+
+    /* WHO THE MAIL IS FROM.
+     * The display name must be the same legal name printed on the invoice, or the
+     * envelope and the document disagree about who is selling -- exactly the kind of
+     * mismatch that gets an invoice sent back for rattelse. sellerIdentity() is the
+     * single authority for that name; the address it returns comes from the venture,
+     * then the business default, then the environment.
+     *
+     * The address's DOMAIN MUST BE VERIFIED IN RESEND. An unverified domain is not a
+     * soft failure -- Resend rejects the send outright, so it is checked before the
+     * number is allocated rather than after.
+     */
+    const seller = sellerIdentity({ settings, venture, lang: invoice.language === "en" ? "en" : "sv" });
+    const fromName = seller.headerName || settings?.business_name || "Nordbok Studio";
+    const configured = seller.fromEmail || process.env.RESEND_FROM_EMAIL || null;
+    if (!configured) {
+      return NextResponse.json({
+        error: "Ingen avsändaradress är konfigurerad. Ange den under Inställningar → Verksamheter, och verifiera domänen i Resend.",
+      }, { status: 400 });
+    }
+    /* Accept either a bare address or an already-formatted "Name <addr>" string. */
+    const fromEmail = configured.includes("<") ? configured : `${fromName} <${configured}>`;
 
     const en = invoice.language === "en";
     const subject = en
@@ -126,8 +149,15 @@ export async function POST(req) {
 <hr style="border:0;border-top:1px solid #e7e7e0;margin:24px 0">
 ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\/html>$/i, "")}`;
 
+    /* `replyTo`, not `reply_to`. The Resend Node SDK went camelCase at v2 and silently
+     * ignores the snake_case key -- so every customer reply was going back to the
+     * sending domain instead of to a mailbox anyone reads. */
     const result = await resend.emails.send({
-      from: fromEmail, to: client.email, reply_to: user.email, subject, html: body,
+      from: fromEmail,
+      to: client.email,
+      replyTo: seller.replyTo || user.email,
+      subject,
+      html: body,
     });
     if (result.error) {
       return NextResponse.json({ error: result.error.message || "Resend error" }, { status: 502 });
@@ -142,6 +172,7 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       subtotal: bd.subtotal,
       vat_amount: bd.vatTotal,
       total: bd.total,
+      sent_from: fromEmail,
     }).eq("id", invoice_id);
 
     await sb.from("studio_tasks").insert({

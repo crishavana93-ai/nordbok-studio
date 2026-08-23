@@ -18,6 +18,7 @@ import { serverClient } from "@/lib/supabase-server";
 import InvoiceActions from "./actions";
 import ComplianceGate from "@/components/invoices/ComplianceGate";
 import { money, num, pct, dateISO, daysPhrase } from "@/lib/format";
+import { sellerIdentity } from "@/lib/seller";
 
 export const dynamic = "force-dynamic";
 
@@ -54,10 +55,18 @@ export default async function InvoiceView({ params }) {
   if (error) console.error("[invoice]", error.message);
   if (!inv) return notFound();
 
-  const [{ data: items }, { data: settings }] = await Promise.all([
+  const [{ data: items }, { data: settings }, { data: venture }] = await Promise.all([
     sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position"),
     sb.from("studio_settings").select("*").eq("user_id", inv.user_id).maybeSingle(),
+    inv.venture
+      ? sb.from("studio_venture_identity").select("*")
+          .eq("user_id", inv.user_id).eq("venture", inv.venture).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
+
+  /* One authority for the seller block, shared with the PDF and the email, so the
+     three copies of this invoice can never disagree about who issued it. */
+  const seller = sellerIdentity({ settings, venture, lang: inv.language === "en" ? "en" : "sv" });
 
   const c = inv.studio_clients;
   const s = STATUS[inv.status] || { label: inv.status, tone: "bg-raised text-ink-3" };
@@ -119,7 +128,10 @@ export default async function InvoiceView({ params }) {
       <article className="rounded-[var(--radius-card)] border border-border bg-surface p-5 sm:p-8">
         <header className="mb-7 flex flex-wrap items-start justify-between gap-6">
           <div>
-            <div className="text-[19px] font-semibold tracking-[-0.015em]">{settings?.business_name || "—"}</div>
+            <div className="text-[19px] font-semibold tracking-[-0.015em]">{seller.headerName || "—"}</div>
+            {seller.subLine && (
+              <div className="mt-0.5 text-[12.5px] text-ink-2">{seller.subLine}</div>
+            )}
             <div className="mt-1.5 whitespace-pre-line text-[13px] leading-relaxed text-ink-2">
               {[
                 settings?.address_street,
@@ -142,6 +154,9 @@ export default async function InvoiceView({ params }) {
               <dt className="text-ink-3">OCR</dt>
               <dd className="tnum font-mono text-ink">{inv.ocr_number || "—"}</dd>
             </dl>
+            {seller.brandLine && (
+              <div className="mt-2 text-[12.5px] text-ink-2">{seller.brandLine}</div>
+            )}
           </div>
         </header>
 

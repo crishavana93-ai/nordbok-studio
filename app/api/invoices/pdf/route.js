@@ -19,8 +19,14 @@ export async function GET(req) {
     const { data: settings } = await sb.from("studio_settings").select("*")
       .eq("user_id", invoice.user_id).maybeSingle();
     const { data: items } = await sb.from("studio_invoice_items").select("*").eq("invoice_id", id).order("position");
+    /* Same venture the invoice was issued under -- the printed copy and the emailed
+       copy must carry an identical seller block or they are two different documents. */
+    const { data: venture } = invoice.venture
+      ? await sb.from("studio_venture_identity").select("*")
+          .eq("user_id", invoice.user_id).eq("venture", invoice.venture).maybeSingle()
+      : { data: null };
 
-    const html = renderInvoiceHTML({ invoice, client, settings, items: items || [] });
+    const html = renderInvoiceHTML({ invoice, client, settings, items: items || [], venture });
     return new NextResponse(html + `<script>setTimeout(()=>window.print(),300)</script>`, {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });

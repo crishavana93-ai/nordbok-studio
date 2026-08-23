@@ -5,6 +5,7 @@ import { validPersonnummer, validOrgNr, buildVatNumber } from "@/lib/swedish-tax
 import { CURRENCIES } from "@/lib/currency";
 import Tip from "@/components/Tip";
 import DeladAtkomst from "@/components/settings/DeladAtkomst";
+import Verksamheter from "@/components/settings/Verksamheter";
 
 export default function SettingsPage() {
   const sb = useMemo(() => browserClient(), []);
@@ -79,6 +80,7 @@ export default function SettingsPage() {
           <div className="grid-3">
             <div className="field"><label className="label">Bankgiro</label><input className="input" value={s.bankgiro || ""} onChange={(e) => setS({ ...s, bankgiro: e.target.value })} /></div>
             <div className="field"><label className="label">Plusgiro</label><input className="input" value={s.plusgiro || ""} onChange={(e) => setS({ ...s, plusgiro: e.target.value })} /></div>
+            <div className="field"><label className="label">Avsändaradress för fakturor</label><input className="input" type="email" value={s.from_email || ""} onChange={(e) => setS({ ...s, from_email: e.target.value })} placeholder="hello@turquinostudios.com" /><div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Används när verksamheten inte har en egen. Domänen måste vara verifierad i Resend.</div></div>
             <div className="field"><label className="label">IBAN</label><input className="input" value={s.iban || ""} onChange={(e) => setS({ ...s, iban: e.target.value })} placeholder="SE45 5000 0000 0583 9825 7466" /></div>
             <div className="field"><label className="label">Std. betalningsvillkor (dagar)</label><input className="input num" type="number" value={s.default_payment_terms_days || 30} onChange={(e) => setS({ ...s, default_payment_terms_days: Number(e.target.value) })} /></div>
             <div className="field"><label className="label">Std. momssats</label>
@@ -122,7 +124,11 @@ export default function SettingsPage() {
         <button className="btn" type="submit" disabled={busy}>{busy ? "Sparar..." : "Spara inställningar"}</button>
       </form>
 
-      {/* Outside the form on purpose: it has its own submit, and nesting forms is invalid. */}
+      {/* Outside the form on purpose: they have their own submits, and nesting forms
+          is invalid HTML -- the inner one silently stops working. */}
+      <div style={{ marginTop: 18 }}>
+        <Verksamheter />
+      </div>
       <div style={{ marginTop: 18 }}>
         <DeladAtkomst />
       </div>
