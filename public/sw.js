@@ -27,7 +27,7 @@
  * caches on activate.
  */
 
-const VERSION = "2026-08-22a";
+const VERSION = "2026-08-23a";
 const CACHE = `nordbok-${VERSION}`;
 const OFFLINE_FALLBACK = "/dashboard";
 

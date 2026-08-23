@@ -24,6 +24,8 @@ import InstallPrompt from "@/components/InstallPrompt";
 import { serverClient } from "@/lib/supabase-server";
 import { getOwnerContext } from "@/lib/access";
 import OwnerSwitcher from "@/components/nav/OwnerSwitcher";
+import AppBar from "@/components/nav/AppBar";
+import Splash from "@/components/Splash";
 
 export const viewport = {
   width: "device-width",
@@ -51,6 +53,19 @@ export default async function RootLayout({ children }) {
   // Only meaningful once a membership exists; OwnerSwitcher renders nothing for one owner.
   const ownerCtx = user ? await getOwnerContext() : null;
 
+  /* The seller's own name. Scoped to the ACTIVE owner, not to auth.uid(): an
+     accountant reading someone else's books must see whose books they are, and an
+     unscoped .maybeSingle() throws for them because RLS returns two rows. */
+  let businessName = null;
+  if (user) {
+    const { data: st } = await sb
+      .from("studio_settings")
+      .select("business_name")
+      .eq("user_id", ownerCtx?.activeId || user.id)
+      .maybeSingle();
+    businessName = st?.business_name || null;
+  }
+
   return (
     <html lang={locale} className={`${plexSans.variable} ${plexMono.variable}`}>
       <body>
@@ -67,6 +82,7 @@ export default async function RootLayout({ children }) {
               <Sidebar email={user.email} />
             </div>
             <main className="app-main">
+              <AppBar businessName={businessName} />
               <OwnerSwitcher owners={ownerCtx?.owners || []} activeId={ownerCtx?.activeId} />
               {children}
             </main>
@@ -77,6 +93,7 @@ export default async function RootLayout({ children }) {
         ) : (
           <main style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>{children}</main>
         )}
+        {user && <Splash name={businessName} />}
         <SwReg />
         <InstallPrompt />
         </LocaleProvider>

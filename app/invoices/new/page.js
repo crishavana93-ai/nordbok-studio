@@ -204,6 +204,37 @@ export default function NewInvoice() {
         <p className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg px-4 py-3 text-[13px] text-ink-2">{err}</p>
       )}
 
+      {/* ── Fran ──────────────────────────────────────────────────────────────
+          The seller. This form asked for the customer, the lines and the VAT, and
+          never once said who the invoice was FROM -- so there was no way to notice
+          from inside the app that the name at the top was the old one. After the
+          Bolagsverket rename that is exactly the field worth showing. */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="micro-label">Från</span>
+            <div className="mt-1 truncate text-[15.5px] font-medium tracking-[-0.01em]">
+              {settings?.business_name || "Ingen verksamhet namngiven"}
+            </div>
+            <div className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
+              {[
+                settings?.vat_number ? `Moms-nr ${settings.vat_number}` : "Moms-nr saknas",
+                settings?.f_skatt_approved ? "Godkänd för F-skatt" : "F-skatt ej angiven",
+                settings?.bankgiro
+                  ? `Bankgiro ${settings.bankgiro}`
+                  : settings?.iban ? `IBAN ${settings.iban}` : "Inget betalsätt angivet",
+              ].join(" · ")}
+            </div>
+          </div>
+          <a
+            href="/settings"
+            className="shrink-0 rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 font-mono text-[11.5px] font-medium text-ink-2 hover:text-ink"
+          >
+            Ändra
+          </a>
+        </div>
+      </section>
+
       {/* ── Kund ── */}
       <section className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Kund</h2>
