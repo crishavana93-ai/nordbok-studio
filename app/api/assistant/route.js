@@ -13,7 +13,9 @@
 
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase-server";
-import { estimateTax, mileageDeduction } from "@/lib/swedish-tax";
+import { mileageDeduction } from "@/lib/swedish-tax";
+import { beraknaResultat } from "@/lib/resultat";
+import { beraknaSkatt } from "@/lib/skatt-2026";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 const MAX_TOKENS = Number(process.env.ASSISTANT_MAX_TOKENS || 3000);
@@ -198,9 +200,14 @@ export async function POST(req) {
     const sumOpen = inv.filter((i) => !["paid", "draft", "cancelled"].includes(i.status)).reduce((a, i) => a + Number(i.total || 0), 0);
     const sumExpenses = rec.filter((r) => r.is_business && r.is_deductible).reduce((a, r) => a + Number(r.total || 0), 0);
     const tripDed = (trips || []).filter((t) => t.is_business).reduce((a, t) => a + Number(t.deduction || mileageDeduction(t.km)), 0);
-    const revenue = inv.reduce((a, i) => a + Number(i.subtotal || 0), 0);
-    const profit = revenue - sumExpenses - tripDed;
-    const tax = estimateTax(Math.max(0, profit));
+    /* Se lib/resultat.js — de tre raderna som stod här räknade obetalda
+       fakturor som intäkt och kostnader brutto. */
+    const resultat = beraknaResultat({ invoices: inv, receipts: rec, trips: trips || [],
+                                       year: now.getFullYear(),
+                                       momsregistrerad: !!settings?.vat_number });
+    const revenue = resultat.intakter;
+    const profit = resultat.overskott;
+    const tax = beraknaSkatt(profit);
 
     /* Kontantmetoden: what actually landed inside the current VAT quarter. */
     const paidInQuarter = inv.filter((i) => i.paid_at && i.paid_at >= q.start && i.paid_at <= q.end);
@@ -224,7 +231,7 @@ ${untagged > 0 ? `⚠ ${untagged} rader saknar venture-tagg` : ""}
 — SNAPSHOT YTD ${now.getUTCFullYear()} —
 Intäkter: ${revenue.toFixed(0)} kr · Inbetalt: ${sumPaid.toFixed(0)} kr · Utestående: ${sumOpen.toFixed(0)} kr
 Avdragsgilla utgifter: ${sumExpenses.toFixed(0)} kr · Reseavdrag: ${tripDed.toFixed(0)} kr
-Beräknad vinst: ${profit.toFixed(0)} kr · Beräknad skatt: ${tax.total_tax} kr (egenavg ${tax.egenavgifter}, kommunal ${tax.kommunalskatt}, statlig ${tax.statligskatt})
+Överskott hittills i år: ${profit.toFixed(0)} kr (betald intäkt ${resultat.intakter} kr, kostnad ${resultat.kostnader} kr netto)\nBeräknad skatt: ${tax.total_skatt} kr — egenavg ${tax.egenavgifter}, kommunal ${tax.kommunalskatt}, statlig ${tax.statligskatt}. Jobbskatteavdraget är INTE medräknat, så siffran är ett tak; verklig skatt blir lägre.
 
 — FAKTUROR (senaste 12 av ${inv.length}) —
 ${inv.slice(0, 12).map((i) => `${i.invoice_number} ${i.studio_clients?.name || "—"} ${i.status} ${i.total} ${i.currency || "SEK"} förfaller ${i.due_date}${i.paid_at ? ` betald ${i.paid_at}` : ""}${i.venture ? ` [${i.venture}]` : ""}`).join("\n") || "(inga)"}
