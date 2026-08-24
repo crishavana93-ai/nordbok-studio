@@ -50,7 +50,7 @@ const ORDER = [
 const BUCKET_FOR = { studio_receipts: "studio-receipts", studio_documents: "studio-documents" };
 
 const args = process.argv.slice(2);
-const root = args.find((a) => !a.startsWith("--"));
+const valdRoot = args.find((a) => !a.startsWith("--"));
 const WRITE = args.includes("--skriv");
 const FORCE = args.includes("--tvinga");
 const flag = (n) => { const i = args.indexOf(n); return i > -1 ? args[i + 1] : null; };
@@ -59,8 +59,40 @@ const ok = (m) => console.log(`  ✓ ${m}`);
 const bad = (m) => console.log(`  ✗ ${m}`);
 const die = (m) => { console.error(`\n✗ ${m}\n`); process.exit(1); };
 
-if (!root) die("Ange arkivmappen. T.ex. node scripts/aterstall.mjs ~/Nordbok-arkiv/nordbok-arkiv-2026-08-24");
-if (!existsSync(root)) die(`Hittar inte ${root}`);
+/* Finding the archive should not be the user's job. Given nothing, look in the default
+ * archive root; given a parent folder, take the newest archive inside it. Asking someone
+ * to type a date they would have to go and look up is a small cruelty in a tool whose
+ * entire purpose is to work on the worst day of the year. */
+async function nyasteArkiv(dir) {
+  if (!existsSync(dir)) return null;
+  const kandidater = [];
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    if (existsSync(path.join(dir, e.name, "MANIFEST.json"))) kandidater.push(e.name);
+  }
+  /* Names are nordbok-arkiv-YYYY-MM-DD, so lexical order is chronological order. */
+  kandidater.sort();
+  return kandidater.length ? path.join(dir, kandidater.at(-1)) : null;
+}
+
+const HEM = process.env.HOME || process.env.USERPROFILE || ".";
+let root = valdRoot;
+
+if (!root) {
+  root = await nyasteArkiv(path.join(HEM, "Nordbok-arkiv"));
+  if (!root) die(`Hittade inget arkiv i ${path.join(HEM, "Nordbok-arkiv")}. Ange mappen: npm run aterstall -- <mapp>`);
+  console.log(`(inget arkiv angivet — använder det senaste: ${path.basename(root)})`);
+} else {
+  root = root.replace(/^~(?=$|\/)/, HEM);
+  if (!existsSync(root)) die(`Hittar inte ${root}`);
+  /* Pointed at the parent rather than a specific archive: take the newest. */
+  if (!existsSync(path.join(root, "MANIFEST.json"))) {
+    const senaste = await nyasteArkiv(root);
+    if (!senaste) die(`${root} innehåller inget Nordbök-arkiv (ingen undermapp med MANIFEST.json).`);
+    root = senaste;
+    console.log(`(använder det senaste arkivet: ${path.basename(root)})`);
+  }
+}
 
 /* ── The writer's naming, duplicated on purpose (see header) ─────────────── */
 const slug = (s) => String(s || "okand").toLowerCase()
@@ -168,6 +200,88 @@ for (const [table, bucket] of Object.entries(BUCKET_FOR)) {
 }
 
 ok(`${checked} rader pekar på en fil · ${verified} kontrollsummerade och oförändrade`);
+
+/* ── Rows with NO document at all ────────────────────────────────────────────
+ * The first version of this checker walked only rows that HAD a storage_path, so a
+ * receipt with no image was invisible to it -- and it printed "✓ Arkivet går att läsa
+ * tillbaka" over the top of that silence. Restorable and complete are two different
+ * claims, and conflating them is how a bookkeeping hole survives an audit tool.
+ *
+ * The number that matters is not how many rows lack an image. It is how much deducted
+ * moms is resting on them, because that is the figure that gets questioned at a
+ * kontroll and repaid with interest if it cannot be defended. */
+/* HOW MUCH MOMS IS ACTUALLY AT RISK.
+ * The first version of this summed vat_sek for every row missing a document. That
+ * overstates it badly, because most rows never put anything into ruta 48 in the first
+ * place. A tool that cries wolf about moms you never deducted trains you to ignore it,
+ * which is worse than saying nothing. So the exposure follows vat_treatment, the same
+ * way lib/moms.js does when it builds the return:
+ *
+ *   domestic     the moms IS deducted in ruta 48 (times business_share). Real exposure.
+ *   rc_eu/non_eu self-accounted: ruta 48 cancels ruta 30. Disallow the 48 at a kontroll
+ *                and the 30 stands alone, so the exposure is the output moms, not zero.
+ *   oss_non_ded  a foreign supplier charged VAT via OSS. It reaches no box at all and
+ *                was never reclaimed. Zero moms exposure.
+ *   exempt       no moms existed. Zero.
+ *
+ * The cost deduction is a separate question and reported separately -- that one is at
+ * risk on every row without underlag, whatever the moms treatment. */
+const sekOf = (r, field) => {
+  const stored = r[field === "total" ? "total_sek" : "vat_sek"];
+  if (stored != null) return Number(stored) || 0;
+  return String(r.currency || "SEK").toUpperCase() === "SEK" ? Number(r[field] || 0) : 0;
+};
+
+function momsIRuta48(r) {
+  if (r.is_deductible === false) return 0;
+  const vat = sekOf(r, "vat_amount");
+  const tot = sekOf(r, "total");
+  switch (r.vat_treatment) {
+    case "domestic":
+      return vat * (r.business_share == null ? 1 : Number(r.business_share));
+    case "rc_eu":
+    case "rc_non_eu": {
+      const net = tot - vat;
+      return (net > 0 ? net : tot) * 0.25;
+    }
+    case "oss_non_ded":
+    case "exempt":
+      return 0;
+    default:
+      /* No treatment set: lib/moms.js will not have put it anywhere either, but an
+         untreated row is its own problem. Count nothing and say so. */
+      return 0;
+  }
+}
+
+const utanFil = [];
+let exponeringPoster = 0, exponeringBelopp = 0, exponeringMoms = 0, obehandlade = 0;
+for (const [table] of Object.entries(BUCKET_FOR)) {
+  for (const r of tables[table] || []) {
+    if (r.storage_path) continue;
+    const avdragsgill = r.is_deductible !== false;
+    const beloppSek = sekOf(r, "total");
+    const momsSek = momsIRuta48(r);
+    if (table === "studio_receipts" && !r.vat_treatment) obehandlade++;
+    utanFil.push({
+      table, id: r.id, label: r.vendor || r.title,
+      datum: r.receipt_date || r.issued_date,
+      avdragsgill, beloppSek, momsSek, behandling: r.vat_treatment || "obehandlad",
+    });
+    if (avdragsgill) { exponeringPoster++; exponeringBelopp += beloppSek; exponeringMoms += momsSek; }
+  }
+}
+
+const sv = (n) => new Intl.NumberFormat("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+if (utanFil.length) {
+  console.log(`  ! ${utanFil.length} rader har ingen fil alls`);
+  for (const u of utanFil.slice(0, 10)) {
+    console.log(`      ${String(u.datum || "utan datum").padEnd(12)} ${String(u.label || "—").padEnd(28)} ${String(u.behandling).padEnd(12)} ${u.momsSek > 0 ? `${sv(u.momsSek)} kr moms i ruta 48` : "ingen moms i ruta 48"}`);
+  }
+  if (utanFil.length > 10) console.log(`      … och ${utanFil.length - 10} till`);
+  warn++;
+}
 for (const m of missing) { bad(`SAKNAS I ARKIVET  ${m.label} — väntade ${m.expected}`); fatal++; }
 for (const a of altered) { bad(`ÄNDRAD  ${a.label} — ${a.arkivfil}`); fatal++; }
 
@@ -192,6 +306,24 @@ if (fatal) {
   process.exit(2);
 }
 console.log(`\n✓ Arkivet går att läsa tillbaka. ${verified} filer kontrollsummerade, ${warn} varningar.`);
+
+/* Said separately and last, because it is a different claim from "restorable" and the
+   reader must not carry the green tick over to it. */
+if (exponeringPoster) {
+  console.log(`\n⚠ MEN BOKFÖRINGEN HAR EN LUCKA`);
+  console.log(`  ${exponeringPoster} avdragsgilla poster saknar verifikation.`);
+  console.log(`  Kostnadsavdrag som vilar på dem:  ${sv(exponeringBelopp)} kr`);
+  console.log(`  Ingående moms avdragen i ruta 48: ${sv(exponeringMoms)} kr`);
+  if (exponeringMoms === 0) {
+    console.log(`  (Ingen moms är i fara — posterna är exempt eller OSS och når aldrig ruta 48.`);
+    console.log(`   Det är kostnadsavdraget i inkomstdeklarationen som saknar underlag.)`);
+  }
+  console.log(`  Bokföringslagen 4 kap. 3 § kräver underlag för varje affärshändelse.`);
+  console.log(`  Arkivet är komplett — det är underlaget som saknas i källan.`);
+}
+if (obehandlade) {
+  console.log(`\n⚠ ${obehandlade} kvitton saknar momsbehandling helt och hamnar ingenstans i deklarationen.`);
+}
 if (!WRITE) {
   console.log("\n  Det här var en kontroll — ingenting skrevs någonstans.");
   console.log("  För en riktig återställning till ett TOMT projekt:");

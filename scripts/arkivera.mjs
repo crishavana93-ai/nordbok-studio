@@ -163,8 +163,19 @@ async function main() {
         /* A count is not the number that matters. What matters is how much deducted
          * moms is resting on rows with no document behind them — that is the figure
          * that would be questioned at a kontroll. */
-        const momsSek = Number(r.vat_sek ?? (r.currency === "SEK" ? r.vat_amount : null)) || 0;
+        /* The moms at risk is what actually reached ruta 48 -- not every ore of VAT
+         * on the row. An exempt myndighetsavgift and an OSS purchase both deduct
+         * NOTHING there, so counting their VAT here invents an exposure that does not
+         * exist. Mirrors the switch in lib/moms.js; see aterstall.mjs for the reasoning. */
         const beloppSek = Number(r.total_sek ?? (r.currency === "SEK" ? r.total : null)) || 0;
+        const vatSek = Number(r.vat_sek ?? (r.currency === "SEK" ? r.vat_amount : null)) || 0;
+        const momsSek =
+          r.is_deductible === false ? 0
+          : r.vat_treatment === "domestic"
+            ? vatSek * (r.business_share == null ? 1 : Number(r.business_share))
+          : (r.vat_treatment === "rc_eu" || r.vat_treatment === "rc_non_eu")
+            ? Math.max(beloppSek - vatSek, 0) * 0.25
+          : 0;
         const avdragsgill = r.is_deductible !== false;
         manifest.filer.utan_fil.push({
           id: r.id, vendor: r.vendor, datum: r.receipt_date,
