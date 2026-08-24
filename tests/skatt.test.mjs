@@ -17,6 +17,8 @@ import { authorizeCron, MIN_SECRET_LENGTH } from "../lib/cron-auth.js";
 import { pathPolicy } from "../lib/path-policy.js";
 import { beraknaSkatt, grundavdrag2026, SKATT_2026 } from "../lib/skatt-2026.js";
 import { beraknaResultat } from "../lib/resultat.js";
+import { paskdagen, arBankdag, nastaBankdag } from "../lib/helgdagar.js";
+import { momsStatus, deadlineForKvartal, kvartal } from "../lib/moms-status.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -237,6 +239,47 @@ chk("tre obetalda fakturor ger noll överskott",
     beraknaResultat({ invoices: [{ status: "sent", paid_at: null, currency: "SEK", subtotal: 99999 }], year: 2026 }).overskott, 0);
 chk("ej momsregistrerad: momsen är en kostnad",
     beraknaResultat({ receipts: [{ receipt_date: "2026-03-01", currency: "SEK", total: 1250, vat_amount: 250, vat_treatment: "domestic" }], year: 2026, momsregistrerad: false }).kostnader, 1250);
+
+
+/* ── bankdagar: en deadline på en helgdag flyttas fram ─────────────────────── */
+console.log("\n── helgdagar och bankdagar ──");
+chk("påskdagen 2025", paskdagen(2025), "2025-04-20");
+chk("påskdagen 2026", paskdagen(2026), "2026-04-05");
+chk("påskdagen 2027", paskdagen(2027), "2027-03-28");
+chk("17 aug 2026 är bankdag", arBankdag("2026-08-17"), true);
+chk("1 maj är det inte", arBankdag("2026-05-01"), false);
+chk("Kristi himmelsfärd 2026 är det inte", arBankdag("2026-05-14"), false);
+chk("midsommarafton 2026 är det inte", arBankdag("2026-06-19"), false);
+chk("lördag flyttas till måndag", nastaBankdag("2026-08-15"), "2026-08-17");
+chk("juldagen flyttas till 28 dec", nastaBankdag("2026-12-25"), "2026-12-28");
+
+/* ── momsdeklarationens deadlines ──────────────────────────────────────────── */
+console.log("\n── momsdeklaration: deadlines ──");
+chk("Q1 2026 senast 12 maj", deadlineForKvartal(2026, 1), "2026-05-12");
+chk("Q2 2026 senast 17 augusti", deadlineForKvartal(2026, 2), "2026-08-17");
+chk("Q3 2026 senast 12 november", deadlineForKvartal(2026, 3), "2026-11-12");
+chk("Q4 2026 senast 12 februari 2027", deadlineForKvartal(2026, 4), "2027-02-12");
+chk("Q4 2027: 12 feb är lördag, flyttas", deadlineForKvartal(2027, 4), "2028-02-14");
+chk("Q2 slutar 30 juni", kvartal(2026, 2).end, "2026-06-30");
+
+/* Den missade deklarationen som föranledde hela filen: registrerad 2026-04-29,
+   Q2 skulle ha lämnats senast 17 augusti, och den 24:e var ingenting lämnat. */
+console.log("\n── momsdeklaration: status ──");
+const MS = momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24", lamnade: [] });
+chk("första perioden är Q2 2026", MS.perioder[0].key, "2026-Q2");
+chk("Q2 är försenad", MS.perioder[0].status, "försenad");
+chk("sju dagar sen", MS.perioder[0].dagar_forsenad, 7);
+chk("förseningsavgift 625 kr", MS.perioder[0].forseningsavgift, 625);
+chk("Q3 pågår fortfarande", MS.perioder[1].status, "pågående");
+chk("en försenad period", MS.forsenade.length, 1);
+chk("lämnad period är inte försenad",
+    momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24",
+                 lamnade: [{ period_key: "2026-Q2", lamnad_at: "2026-08-14T10:00:00Z" }] }).forsenade.length, 0);
+chk("på deadlinedagen är man i tid", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-17" }).forsenade.length, 0);
+chk("dagen efter är man sen", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-18" }).forsenade.length, 1);
+chk("utan registreringsdatum: ingen gissning", momsStatus({ registreradFrom: null, idag: "2026-08-24" }).saknarRegistreringsdatum, true);
+chk("avregistrering avslutar serien",
+    momsStatus({ registreradFrom: "2026-01-01", avregistreradFrom: "2026-04-01", idag: "2026-12-01" }).perioder.length, 2);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

@@ -14,7 +14,8 @@
     "aterstall": "node scripts/aterstall.mjs",
     "test": "node tests/skatt.test.mjs",
     "sie": "node scripts/sie.mjs",
-    "kontera": "node scripts/kontera.mjs"
+    "kontera": "node scripts/kontera.mjs",
+    "momsstatus": "node scripts/momsstatus.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
