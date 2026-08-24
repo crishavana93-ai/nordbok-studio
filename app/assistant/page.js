@@ -1,4 +1,6 @@
 "use client";
+import { postJson } from "@/lib/safe-json";
+import { reportErrorAsync } from "@/lib/report-error";
 import { useState, useRef, useEffect } from "react";
 
 const SUGGESTIONS = [
@@ -25,20 +27,24 @@ export default function AssistantPage() {
     setBusy(true); setErr("");
     setMsgs((m) => [...m, { role: "user", content: message }]);
     setInput("");
-    try {
-      const r = await fetch("/api/assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ thread_id: thread, message }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Misslyckades");
-      setThread(j.thread_id);
-      setMsgs((m) => [...m, { role: "assistant", content: j.reply }]);
-    } catch (e) {
-      setErr(e.message);
-      setMsgs((m) => [...m, { role: "assistant", content: `(fel: ${e.message})` }]);
-    } finally { setBusy(false); }
+
+    const { ok, data: j, error } = await postJson("/api/assistant", { thread_id: thread, message });
+
+    if (!ok) {
+      /* The failure is shown as an error, NOT appended as a fake assistant turn.
+       * It used to be pushed into the transcript as "(fel: …)" — but the server reads
+       * history back from studio_assistant_log, which never saw it. The two
+       * transcripts diverged permanently after the first failure, and the model was
+       * then answering with a different conversation in mind than the one on screen. */
+      setErr(error || "Assistenten svarade inte.");
+      reportErrorAsync(new Error(error || "assistant failed"), { scope: "ui/assistant" });
+      setBusy(false);
+      return;
+    }
+
+    setThread(j.thread_id);
+    setMsgs((m) => [...m, { role: "assistant", content: j.reply }]);
+    setBusy(false);
   }
 
   return (

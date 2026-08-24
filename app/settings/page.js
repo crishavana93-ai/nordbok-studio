@@ -6,6 +6,7 @@ import { CURRENCIES } from "@/lib/currency";
 import Tip from "@/components/Tip";
 import DeladAtkomst from "@/components/settings/DeladAtkomst";
 import Verksamheter from "@/components/settings/Verksamheter";
+import Felhistorik from "@/components/settings/Felhistorik";
 
 export default function SettingsPage() {
   const sb = useMemo(() => browserClient(), []);
@@ -127,6 +128,10 @@ export default function SettingsPage() {
 
       {/* Outside the form on purpose: they have their own submits, and nesting forms
           is invalid HTML -- the inner one silently stops working. */}
+      {/* Renders nothing when there is nothing wrong. */}
+      <div style={{ marginTop: 18 }}>
+        <Felhistorik />
+      </div>
       <div style={{ marginTop: 18 }}>
         <Verksamheter />
       </div>

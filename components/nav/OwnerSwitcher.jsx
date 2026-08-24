@@ -12,6 +12,7 @@
  */
 
 import { useState } from "react";
+import { postJson } from "@/lib/safe-json";
 import { useRouter } from "next/navigation";
 
 export default function OwnerSwitcher({ owners, activeId }) {
@@ -28,16 +29,9 @@ export default function OwnerSwitcher({ owners, activeId }) {
     if (id === activeId) return;
     setBusy(true); setErr(null);
     try {
-      const res = await fetch("/api/owner", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner_id: id }),
-      });
-      const j = await res.json();
-      if (!res.ok) { setErr(j.error || "Kunde inte byta."); return; }
+      const { ok, error } = await postJson("/api/owner", { owner_id: id });
+      if (!ok) { setErr(error || "Kunde inte byta."); return; }
       router.refresh();
-    } catch (e) {
-      setErr(e.message || "Nätverksfel.");
     } finally { setBusy(false); }
   }
 

@@ -12,6 +12,8 @@
  */
 
 import { useState } from "react";
+import { postJson } from "@/lib/safe-json";
+import { reportErrorAsync } from "@/lib/report-error";
 
 export default function ComplianceGate({ invoiceId, disabled, label = "Skicka faktura", onSent }) {
   const [state, setState] = useState("idle");   // idle | checking | blocked | warned | sent
@@ -22,27 +24,43 @@ export default function ComplianceGate({ invoiceId, disabled, label = "Skicka fa
 
   async function send(acknowledge = false) {
     setState("checking"); setFatal(null);
-    try {
-      const res = await fetch("/api/invoices/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoice_id: invoiceId, acknowledge_warnings: acknowledge }),
-      });
-      const j = await res.json();
+    /* postJson never throws and never hands back a parser complaint. The old code
+       called res.json() directly, so a timeout — which returns Next's HTML error page
+       — surfaced as: Unexpected token '<', "<!DOCTYPE"... is not valid JSON. That was
+       the entire explanation a user got for an invoice that did not send. */
+    const { ok, status, data: j, error } = await postJson("/api/invoices/send", {
+      invoice_id: invoiceId, acknowledge_warnings: acknowledge,
+    });
 
-      if (res.status === 422) {              // defective — cannot send
-        setErrors(j.errors || []); setWarnings(j.warnings || []); setState("blocked"); return;
-      }
-      if (res.status === 409) {              // legal, but worth a second look
-        setWarnings(j.warnings || []); setState("warned"); return;
-      }
-      if (!res.ok) { setFatal(j.error || "Kunde inte skicka fakturan."); setState("idle"); return; }
-
-      setResult(j); setWarnings(j.warnings || []); setState("sent");
-      onSent?.(j);
-    } catch (e) {
-      setFatal(e.message || "Nätverksfel."); setState("idle");
+    if (status === 422) {              // defective — cannot send
+      setErrors(j.errors || []); setWarnings(j.warnings || []); setState("blocked"); return;
     }
+    if (status === 409) {              // legal, but worth a second look
+      setWarnings(j.warnings || []); setState("warned"); return;
+    }
+
+    /* The one outcome that must never read as an ordinary failure: the mail left, the
+       number is spent, and retrying would send it twice. */
+    if (j.sent_but_unrecorded) {
+      setFatal(error || "Fakturan skickades men kunde inte sparas. Skicka inte igen.");
+      setState("idle");
+      reportErrorAsync(new Error("sent_but_unrecorded"), {
+        scope: "ui/invoice-send", level: "error",
+        context: { invoiceId, invoice_number: j.invoice_number, status },
+      });
+      return;
+    }
+
+    if (!ok) {
+      setFatal(error || "Kunde inte skicka fakturan."); setState("idle");
+      reportErrorAsync(new Error(error || "send failed"), {
+        scope: "ui/invoice-send", context: { invoiceId, status },
+      });
+      return;
+    }
+
+    setResult(j); setWarnings(j.warnings || []); setState("sent");
+    onSent?.(j);
   }
 
   if (state === "sent") {

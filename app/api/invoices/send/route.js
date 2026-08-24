@@ -25,6 +25,7 @@ import { renderInvoiceHTML } from "@/lib/invoice-html";
 import { validateInvoice, vatBreakdown } from "@/lib/invoice-compliance";
 import { sellerIdentity } from "@/lib/seller";
 import { toSek } from "@/lib/fx";
+import { reportError } from "@/lib/report-error";
 
 /* The credit reason is text the user typed. It goes straight into an HTML email, so it
  * gets escaped here rather than trusted. */
@@ -333,6 +334,13 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       warnings: check.warnings,
     });
   } catch (e) {
+    /* The catch-all used to return e.message and nothing more — no record anywhere
+       that the route had thrown. Now it lands in studio_error_log, which Inställningar
+       reads, so a repeated failure becomes visible without anyone watching a log. */
+    try {
+      const { sb: sb2, user: u2 } = await requireUser();
+      await reportError(e, { scope: "api/invoices/send", sb: sb2, userId: u2?.id });
+    } catch { /* reporting must never mask the original error */ }
     return NextResponse.json({ error: e.message || String(e) }, { status: e.status || 500 });
   }
 }

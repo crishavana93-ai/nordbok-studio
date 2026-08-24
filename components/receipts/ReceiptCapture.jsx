@@ -1,5 +1,8 @@
 "use client";
 
+import { safeJson } from "@/lib/safe-json";
+import { reportErrorAsync } from "@/lib/report-error";
+
 /* components/receipts/ReceiptCapture.jsx — DIRECTION A · KONTOR
  *
  * Camera-first receipt capture. Photo or PDF → stored and hashed → OCR suggests,
@@ -136,10 +139,20 @@ export default function ReceiptCapture({ onSaved }) {
     fd.append("file", f);
 
     try {
+      /* Offline is the likely failure here, not a server bug — this is the screen
+         used standing next to a car. Say that, instead of "Failed to fetch". */
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        setErr("Du är offline. Kvittot laddas inte upp förrän du har täckning — behåll bilden i kamerarullen så länge.");
+        setStage("idle"); return;
+      }
       const res = await fetch("/api/receipts/upload", { method: "POST", body: fd });
-      const j = await res.json();
+      const { ok, data: j, error } = await safeJson(res);
 
-      if (!res.ok) { setErr(j.error || "Uppladdningen misslyckades."); setStage("idle"); return; }
+      if (!ok) {
+        setErr(error || "Uppladdningen misslyckades.");
+        reportErrorAsync(new Error(error || "upload failed"), { scope: "ui/receipt-upload" });
+        setStage("idle"); return;
+      }
       if (j.duplicate) { setDupe(j); setStage("idle"); return; }
 
       setMeta({
@@ -201,13 +214,23 @@ export default function ReceiptCapture({ onSaved }) {
           vat_amount: form.vat_amount === "" ? 0 : Number(form.vat_amount),
         }),
       });
-      const j = await res.json();
-      if (!res.ok) { setErr(j.error || "Kunde inte spara."); setStage("review"); return; }
+      const { ok, data: j, error } = await safeJson(res);
+      if (!ok) {
+        setErr(error || "Kunde inte spara.");
+        reportErrorAsync(new Error(error || "commit failed"), {
+          scope: "ui/receipt-commit", context: { has_file: Boolean(meta?.storage_path) },
+        });
+        setStage("review"); return;
+      }
 
       reset();
       onSaved?.(j.receipt);
     } catch (e) {
-      setErr(e.message || "Nätverksfel."); setStage("review");
+      /* The image is already uploaded at this point — say so, or the user assumes
+         the photo is lost and takes it again, producing a duplicate. */
+      setErr("Kvittobilden är uppladdad men uppgifterna kunde inte sparas. Prova igen — bilden laddas inte upp på nytt.");
+      reportErrorAsync(e, { scope: "ui/receipt-commit" });
+      setStage("review");
     }
   }
 
