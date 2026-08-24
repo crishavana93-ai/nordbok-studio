@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 /* components/dashboard/DashboardClient.jsx — DIRECTION A · KONTOR
  *
  * LAW 08 — sparse on the surface. Hero, three tiles, one chart, and a queue that is
@@ -180,6 +182,68 @@ export default function DashboardClient({ data, ventures }) {
       </section>
 
       {/* Law 05 — the queue, with verbs. Gone entirely when there is nothing to do. */}
+      {/* ── Kom igång ────────────────────────────────────────────────────────
+          A checklist that teaches by doing and then deletes itself. It sits ABOVE the
+          figures because until the first invoice is out those figures are all zero,
+          and a screen of zeros with no explanation is the worst first impression this
+          app can make.
+
+          It is derived from the data, never from a stored "onboarded" flag — and it
+          stops for good once an invoice has actually been sent, which is a fact that
+          cannot regress because sent invoices are immutable. */}
+      {data.setup && (
+        <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Kom igång</h2>
+            <span className="font-mono text-[11.5px] text-ink-3">
+              {num(data.setup.done)} av {num(data.setup.total)} klart
+            </span>
+          </div>
+
+          <div className="mt-3 flex gap-1" role="img"
+               aria-label={`${data.setup.done} av ${data.setup.total} steg klara`}>
+            {data.setup.steps.map((s) => (
+              <span key={s.key}
+                className={`h-1 flex-1 rounded-full ${s.done ? "bg-brand" : "bg-raised"}`} />
+            ))}
+          </div>
+
+          <ol className="mt-4 flex flex-col">
+            {data.setup.steps.map((s) => {
+              const isNext = data.setup.next?.key === s.key;
+              return (
+                <li key={s.key} className="border-b border-border py-3 last:border-b-0">
+                  <div className="flex items-start gap-3">
+                    <span aria-hidden="true"
+                      className={`mt-[1px] grid size-5 shrink-0 place-items-center rounded-full font-mono text-[11px] ${
+                        s.done ? "bg-good-bg text-good" : isNext ? "bg-brand text-brand-ink" : "bg-raised text-ink-3"
+                      }`}>
+                      {s.done ? "✓" : "·"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[14px] ${s.done ? "text-ink-3 line-through" : "font-medium text-ink"}`}>
+                        {s.title}
+                      </p>
+                      {/* The reason is only shown for the step you are on. Five
+                          paragraphs at once is a wall; one is a prompt. */}
+                      {isNext && (
+                        <>
+                          <p className="mt-1 max-w-[54ch] text-[12.5px] leading-relaxed text-ink-2">{s.why}</p>
+                          <Link href={s.href}
+                            className="mt-2.5 inline-block rounded-[var(--radius-ctl)] bg-brand px-3.5 py-2 text-[13px] font-semibold text-brand-ink">
+                            {s.title}
+                          </Link>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
+
       {/* TRUNCATION.
           The hero figures are summed from the rows that came back. Past the query
           ceiling that set is incomplete, and a total that is wrong by an unknown
