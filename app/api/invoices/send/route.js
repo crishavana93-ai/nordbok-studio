@@ -24,6 +24,7 @@ import { requireUser } from "@/lib/supabase-server";
 import { renderInvoiceHTML } from "@/lib/invoice-html";
 import { validateInvoice, vatBreakdown } from "@/lib/invoice-compliance";
 import { sellerIdentity } from "@/lib/seller";
+import { toSek } from "@/lib/fx";
 
 /* The credit reason is text the user typed. It goes straight into an HTML email, so it
  * gets escaped here rather than trusted. */
@@ -85,7 +86,15 @@ export async function POST(req) {
 
     /* ── The gate ──────────────────────────────────────────────────────────── */
     const check = validateInvoice({
-      invoice: { ...invoice, invoice_number: invoice.invoice_number || "PENDING" },
+      /* The kronor figure is computed further down, at send. Tell the validator it will
+         exist so it does not reject every foreign-currency invoice before we get there;
+         if the rate lookup then fails, the send aborts anyway. */
+      invoice: {
+        ...invoice,
+        invoice_number: invoice.invoice_number || "PENDING",
+        doc_vat_sek: invoice.doc_vat_sek ?? 0,
+        doc_fx_rate: invoice.doc_fx_rate ?? 1,
+      },
       client,
       settings,
       items: items || [],
@@ -177,11 +186,40 @@ export async function POST(req) {
     const bd = vatBreakdown(items || []);
     const frozen = bd.rows.map((r) => ({ rate: r.rate, net: r.net, vat: r.vat, gross: r.gross }));
 
-    const sendable = { ...invoice, invoice_number: invoiceNumber, vat_breakdown: frozen };
+    /* ── Momsen i kronor, för en faktura i utländsk valuta ──────────────────
+     * A Swedish business keeping books in SEK may invoice in any currency, but the VAT
+     * must ALSO be stated in kronor on the invoice, at the rate at the tax point.
+     * Nordbok shipped EUR invoices with no kronor on them at all until now.
+     *
+     * The rate is taken at supply_date (falling back to issue_date), NOT at payment.
+     * The payment-date conversion is a different question with a different answer and
+     * it lives in total_sek, which scripts/backfill-fx.mjs owns. Mixing them would make
+     * a printed invoice change every time a payment was recorded. */
+    const ccy = String(invoice.currency || "SEK").toUpperCase();
+    let docFx = null;
+    if (ccy !== "SEK" && Number(bd.vatTotal) !== 0 && !invoice.reverse_charge) {
+      const taxPoint = invoice.supply_date || invoice.issue_date;
+      try {
+        const conv = await toSek({ amount: bd.vatTotal, currency: ccy, date: taxPoint, sb });
+        docFx = {
+          doc_vat_sek: conv.amountSek, doc_fx_rate: conv.rate,
+          doc_fx_date: conv.rateDate, doc_fx_source: conv.source,
+        };
+      } catch (e) {
+        /* Refuse rather than invent. An invoice missing the kronor figure is defective;
+         * one carrying a made-up rate is worse. The number is not spent yet at this
+         * point in the route, so nothing is lost by stopping here. */
+        await releaseNumber(`Kunde inte hämta växelkurs för ${ccy}: ${e.message}`);
+        return NextResponse.json({
+          error: `Fakturan är i ${ccy} och momsen måste anges i kronor, men växelkursen för ${taxPoint} gick inte att hämta (${e.message}). Försök igen, eller fakturera i SEK.`,
+        }, { status: 502 });
+      }
+    }
+
+    const sendable = { ...invoice, invoice_number: invoiceNumber, vat_breakdown: frozen, ...(docFx || {}) };
     const html = renderInvoiceHTML({ invoice: sendable, client, settings, items: items || [], venture, creditOf });
 
     /* ── Email, in the invoice's own currency ──────────────────────────────── */
-    const ccy = invoice.currency || "SEK";
     const money = new Intl.NumberFormat("sv-SE", {
       style: "currency", currency: ccy, minimumFractionDigits: 2,
     }).format(Number(invoice.total) || 0);
@@ -246,6 +284,7 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       status: "sent",
       sent_at: new Date().toISOString(),
       vat_breakdown: frozen,
+      ...(docFx || {}),
       subtotal: bd.subtotal,
       vat_amount: bd.vatTotal,
       total: bd.total,

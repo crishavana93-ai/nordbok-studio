@@ -31,8 +31,13 @@ const STATUS = {
   cancelled:      { label: "Makulerad",  tone: "bg-raised text-ink-3" },
 };
 
-function Kr({ value, decimals = 2, className = "" }) {
-  const m = money(value, { decimals });
+/* The invoice's OWN currency, not the reader's. This component used to call
+ * money(value, {decimals}) with no currency at all, so format.js fell through to its
+ * "kr" default and a EUR invoice rendered as "1 000,00 kr" on screen while the PDF and
+ * the email — which both go through fmtMoney(n, ccy) — printed euros. Three views of
+ * one document, disagreeing about the currency. */
+function Kr({ value, currency = "SEK", decimals = 2, className = "" }) {
+  const m = money(value, { decimals, currency });
   return (
     <span className={`tnum ${className}`} lang="sv-SE" aria-label={m.spoken}>{m.text}</span>
   );
@@ -227,7 +232,7 @@ export default async function InvoiceView({ params }) {
               Personnr (kund): <span className="font-mono text-ink">{c?.org_nr || "—"}</span>
               <br />
               {inv.rot_rut_type}-avdrag:{" "}
-              <Kr value={Number(inv.rot_amount) || Number(inv.rut_amount) || 0} className="text-ink" />
+              <Kr currency={inv.currency} value={Number(inv.rot_amount) || Number(inv.rut_amount) || 0} className="text-ink" />
             </Block>
           )}
         </div>
@@ -263,13 +268,13 @@ export default async function InvoiceView({ params }) {
                       {num(it.quantity, { decimals: Number(it.quantity) % 1 ? 2 : 0 })} {it.unit}
                     </td>
                     <td className="border-b border-border px-2 py-2.5 text-right">
-                      <Kr value={it.unit_price} className="font-mono text-[13px] text-ink-2" />
+                      <Kr currency={inv.currency} value={it.unit_price} className="font-mono text-[13px] text-ink-2" />
                     </td>
                     <td className="tnum border-b border-border px-2 py-2.5 text-right font-mono text-[13px] text-ink-2">
                       {pct(it.vat_rate)}
                     </td>
                     <td className="border-b border-border px-2 py-2.5 text-right">
-                      <Kr value={Number(it.quantity) * Number(it.unit_price)} className="font-mono text-[13px]" />
+                      <Kr currency={inv.currency} value={Number(it.quantity) * Number(it.unit_price)} className="font-mono text-[13px]" />
                     </td>
                   </tr>
                 ))
@@ -281,20 +286,20 @@ export default async function InvoiceView({ params }) {
         <div className="flex justify-end">
           <dl className="grid w-full max-w-[300px] grid-cols-[1fr_auto] gap-x-6 gap-y-1.5 text-[13.5px]">
             <dt className="text-ink-2">Delsumma</dt>
-            <dd className="text-right"><Kr value={inv.subtotal} className="font-mono" /></dd>
+            <dd className="text-right"><Kr currency={inv.currency} value={inv.subtotal} className="font-mono" /></dd>
             <dt className="text-ink-2">Moms</dt>
-            <dd className="text-right"><Kr value={inv.vat_amount} className="font-mono" /></dd>
+            <dd className="text-right"><Kr currency={inv.currency} value={inv.vat_amount} className="font-mono" /></dd>
             {Number(inv.rot_amount) > 0 && (<>
               <dt className="text-ink-2">ROT-avdrag</dt>
-              <dd className="text-right"><Kr value={-Math.abs(inv.rot_amount)} className="font-mono" /></dd>
+              <dd className="text-right"><Kr currency={inv.currency} value={-Math.abs(inv.rot_amount)} className="font-mono" /></dd>
             </>)}
             {Number(inv.rut_amount) > 0 && (<>
               <dt className="text-ink-2">RUT-avdrag</dt>
-              <dd className="text-right"><Kr value={-Math.abs(inv.rut_amount)} className="font-mono" /></dd>
+              <dd className="text-right"><Kr currency={inv.currency} value={-Math.abs(inv.rut_amount)} className="font-mono" /></dd>
             </>)}
             <dt className="mt-2 border-t-2 border-ink pt-2.5 text-[15px] font-medium text-ink">Att betala</dt>
             <dd className="mt-2 border-t-2 border-ink pt-2.5 text-right">
-              <Kr value={inv.total} className="font-mono text-[17px] font-medium" />
+              <Kr currency={inv.currency} value={inv.total} className="font-mono text-[17px] font-medium" />
             </dd>
           </dl>
         </div>
