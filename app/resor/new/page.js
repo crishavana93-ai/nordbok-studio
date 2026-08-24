@@ -1,9 +1,22 @@
 "use client";
+
+/* app/resor/new/page.js — DIRECTION C
+ *
+ * Migrated 2026-08-24. Beyond colour: the client picker is scoped to the active owner,
+ * every field is inside a <label>, and the whole thing is a real <form> so Enter
+ * submits instead of doing nothing.
+ *
+ * The Tip component is gone from this page for the same reason it left Inställningar —
+ * it renders a button, and a button inside a <label> steals the click that should
+ * focus the field. The text it carried now sits under the field permanently.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { browserClient } from "@/lib/supabase";
 import { COUNTRIES, CURRENCIES, COUNTRY_TO_CURRENCY } from "@/lib/currency";
-import Tip from "@/components/Tip";
+import { readActiveOwnerId } from "@/lib/owner-client";
+import { reportErrorAsync } from "@/lib/report-error";
 
 export default function NewTrip() {
   const router = useRouter();
@@ -26,7 +39,18 @@ export default function NewTrip() {
   const [contact, setContact] = useState({ name: "", company: "", role: "", email: "" });
 
   useEffect(() => {
-    sb.from("studio_clients").select("id,name,country_code").eq("archived", false).order("name").then(({ data }) => setClients(data || []));
+    /* Scoped. Unfiltered, this offered another owner's customers to attach to your
+       trip once revisor access existed. */
+    (async () => {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) return;
+      const { data, error } = await sb.from("studio_clients")
+        .select("id,name,country_code")
+        .eq("user_id", readActiveOwnerId(user.id))
+        .eq("archived", false).order("name");
+      if (error) reportErrorAsync(error, { scope: "ui/resor-clients" });
+      setClients(data || []);
+    })();
   }, [sb]);
 
   // Auto-suggest currency from country
@@ -44,7 +68,8 @@ export default function NewTrip() {
     setContacts((arr) => arr.filter((_, idx) => idx !== i));
   }
 
-  async function save() {
+  async function save(e) {
+    e?.preventDefault();
     setErr(""); setBusy(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
@@ -65,115 +90,200 @@ export default function NewTrip() {
       if (error) throw error;
       router.push(`/resor/${data.id}`);
       router.refresh();
-    } catch (e) { setErr(e.message); }
-    finally { setBusy(false); }
+    } catch (e2) {
+      setErr(e2.message);
+      reportErrorAsync(e2, { scope: "ui/resor-new" });
+    } finally { setBusy(false); }
   }
 
+  const inputCls =
+    "w-full rounded-[var(--radius-ctl)] border border-border bg-surface px-3 py-2.5 text-[16px] text-ink " +
+    "focus:border-border-firm focus:outline-none focus:ring-2 focus:ring-brand/25";
+
+  const Field = ({ label, hint, required, wide, children }) => (
+    <label className={`flex flex-col gap-1.5 ${wide ? "sm:col-span-2" : ""}`}>
+      <span className="micro-label">{label}{required && <span className="text-crit"> *</span>}</span>
+      {children}
+      {hint && <span className="text-[11.5px] leading-relaxed text-ink-3">{hint}</span>}
+    </label>
+  );
+
+  const days = Math.max(1, Math.round(
+    (new Date(t.end_date) - new Date(t.start_date)) / 86400000) + 1);
+
   return (
-    <>
-      <h1 className="h1" style={{ marginBottom: 14 }}>Ny affärsresa</h1>
-      {err && <div className="alert alert-error">{err}</div>}
-
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Grundinfo</h2>
-        <div className="field">
-          <label className="label">Kort titel</label>
-          <input className="input" value={t.title} onChange={(e) => setT({ ...t, title: e.target.value })} placeholder="t.ex. Berlin — kundmöte Acme + CeBIT" />
-        </div>
-        <div className="grid-2">
-          <div className="field"><label className="label">Destination</label><input className="input" value={t.destination} onChange={(e) => setT({ ...t, destination: e.target.value })} placeholder="Berlin, Tyskland" /></div>
-          <div className="field"><label className="label">Land</label>
-            <select className="select" value={t.country_code} onChange={(e) => setT({ ...t, country_code: e.target.value })}>
-              {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
-            </select>
-          </div>
-          <div className="field"><label className="label">Avresa</label><input className="input" type="date" value={t.start_date} onChange={(e) => setT({ ...t, start_date: e.target.value })} /></div>
-          <div className="field"><label className="label">Hemkomst</label><input className="input" type="date" value={t.end_date} onChange={(e) => setT({ ...t, end_date: e.target.value })} /></div>
-          <div className="field" style={{ gridColumn: "1/-1" }}>
-            <label className="label">Syfte (varför reser du?) <Tip text="Skatteverket avgör om resan är avdragsgill baserat på syftet. Var konkret: 'kundmöte med Acme GmbH för avtalsförnyelse', 'mässa CeBIT 2026', 'leverantörsbesök Müller Werke', 'fortbildning AWS Summit'. Vagt syfte = underkänd resa." /></label>
-            <textarea className="textarea" rows={3} value={t.purpose} onChange={(e) => setT({ ...t, purpose: e.target.value })} placeholder="t.ex. Kundmöte Acme GmbH (avtalsförhandling Q3 2026) + mässa CeBIT — sourcing av nya leverantörer." />
-          </div>
-        </div>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+      <div>
+        <h1 className="text-[21px] font-medium tracking-[-0.015em]">Ny affärsresa</h1>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+          Syftet och deltagarna är det Skatteverket frågar efter först. Fyll i dem nu
+          medan du minns — i efterhand är det svårt.
+        </p>
       </div>
 
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Kontakter & kund <Tip text="Lista vem du faktiskt träffade — namn + företag + roll. Skatteverket frågar 'vem mötte du?' i revision. E-post inte krävt men hjälper dig att kontakta dem senare." /></h2>
-        <div className="field">
-          <label className="label">Kund (om kopplad till specifik kund)</label>
-          <select className="select" value={t.client_id} onChange={(e) => setT({ ...t, client_id: e.target.value })}>
-            <option value="">— Ingen specifik kund —</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.country_code !== "SE" ? ` (${c.country_code})` : ""}</option>)}
-          </select>
-        </div>
+      {err && (
+        <p role="alert" className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg px-4 py-3 text-[13px] leading-relaxed text-ink-2">{err}</p>
+      )}
 
-        <div className="field">
-          <label className="label">Konferens / mässa (om applicabelt)</label>
-          <input className="input" value={t.conference} onChange={(e) => setT({ ...t, conference: e.target.value })} placeholder="CeBIT 2026, AWS Summit Stockholm, ..." />
-        </div>
+      <form onSubmit={save} className="flex flex-col gap-3">
 
-        {contacts.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            {contacts.map((c, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-soft)", borderRadius: 9, marginBottom: 6 }}>
-                <div>
-                  <strong>{c.name}</strong>{c.company ? ` — ${c.company}` : ""}{c.role ? ` (${c.role})` : ""}{c.email ? ` · ${c.email}` : ""}
+        <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Resan</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Kort titel" required wide>
+              <input className={inputCls} value={t.title} autoFocus
+                onChange={(e) => setT({ ...t, title: e.target.value })}
+                placeholder="t.ex. Berlin — kundmöte Acme + mässa" />
+            </Field>
+            <Field label="Destination">
+              <input className={inputCls} value={t.destination}
+                onChange={(e) => setT({ ...t, destination: e.target.value })} placeholder="Berlin, Tyskland" />
+            </Field>
+            <Field label="Land">
+              <select className={inputCls} value={t.country_code}
+                onChange={(e) => setT({ ...t, country_code: e.target.value })}>
+                {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Avresa">
+              <input className={inputCls} type="date" value={t.start_date}
+                onChange={(e) => setT({ ...t, start_date: e.target.value })} />
+            </Field>
+            <Field label="Hemresa" hint={`${days} ${days === 1 ? "dag" : "dagar"}`}>
+              <input className={inputCls} type="date" value={t.end_date} min={t.start_date}
+                onChange={(e) => setT({ ...t, end_date: e.target.value })} />
+            </Field>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <div>
+            <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Varför</h2>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
+              Utan ett tydligt affärssyfte är resan inte avdragsgill. Skriv vad du skulle
+              säga om någon frågade om sex år.
+            </p>
+          </div>
+          <Field label="Syfte" required wide>
+            <textarea className={inputCls} rows={3} value={t.purpose}
+              onChange={(e) => setT({ ...t, purpose: e.target.value })}
+              placeholder="Kundmöte med Acme GmbH om ramavtal, samt mässbesök för leverantörskontakter." />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Konferens eller mässa">
+              <input className={inputCls} value={t.conference}
+                onChange={(e) => setT({ ...t, conference: e.target.value })} />
+            </Field>
+            <Field label="Kund resan gäller">
+              <select className={inputCls} value={t.client_id}
+                onChange={(e) => setT({ ...t, client_id: e.target.value })}>
+                <option value="">Ingen särskild</option>
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <div>
+            <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Vilka du träffade</h2>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
+              Namn och företag räcker. Det här är den vanligaste luckan när ett reseavdrag
+              underkänns.
+            </p>
+          </div>
+
+          {contacts.length > 0 && (
+            <div className="flex flex-col">
+              {contacts.map((c, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0">
+                  <span className="min-w-0 text-[13.5px]">
+                    <span className="font-medium text-ink">{c.name}</span>
+                    <span className="text-ink-2">{c.company ? ` — ${c.company}` : ""}{c.role ? ` (${c.role})` : ""}</span>
+                  </span>
+                  <button type="button" onClick={() => removeContact(i)}
+                    className="shrink-0 font-mono text-[11px] text-ink-3 hover:text-crit">Ta bort</button>
                 </div>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeContact(i)}>×</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="grid-4">
-          <div className="field"><label className="label">Namn</label><input className="input" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} placeholder="Hans Müller" /></div>
-          <div className="field"><label className="label">Företag</label><input className="input" value={contact.company} onChange={(e) => setContact({ ...contact, company: e.target.value })} /></div>
-          <div className="field"><label className="label">Roll</label><input className="input" value={contact.role} onChange={(e) => setContact({ ...contact, role: e.target.value })} placeholder="CEO" /></div>
-          <div className="field"><label className="label">E-post</label><input className="input" type="email" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></div>
-        </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={addContact}>+ Lägg till kontakt</button>
-      </div>
-
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Resa & kostnad</h2>
-        <div className="grid-3">
-          <div className="field"><label className="label">Färdmedel</label>
-            <select className="select" value={t.travel_mode} onChange={(e) => setT({ ...t, travel_mode: e.target.value })}>
-              <option value="flight">Flyg</option>
-              <option value="train">Tåg</option>
-              <option value="car">Bil (egen)</option>
-              <option value="mixed">Blandat</option>
-            </select>
-          </div>
-          {(t.travel_mode === "car" || t.travel_mode === "mixed") && (
-            <div className="field"><label className="label">Reg-nummer (för körjournal)</label><input className="input" value={t.vehicle_reg} onChange={(e) => setT({ ...t, vehicle_reg: e.target.value.toUpperCase() })} /></div>
+              ))}
+            </div>
           )}
-          <div className="field"><label className="label">Beräknad kostnad</label><input className="input num" type="number" inputMode="decimal" value={t.estimated_cost} onChange={(e) => setT({ ...t, estimated_cost: e.target.value })} /></div>
-          <div className="field"><label className="label">Valuta</label>
-            <select className="select" value={t.currency} onChange={(e) => setT({ ...t, currency: e.target.value })}>
-              {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
-            </select>
+
+          <div className="grid gap-3 sm:grid-cols-4">
+            <input className={inputCls} value={contact.name} placeholder="Namn"
+              aria-label="Kontaktens namn"
+              onChange={(e) => setContact({ ...contact, name: e.target.value })} />
+            <input className={inputCls} value={contact.company} placeholder="Företag"
+              aria-label="Företag"
+              onChange={(e) => setContact({ ...contact, company: e.target.value })} />
+            <input className={inputCls} value={contact.role} placeholder="Roll"
+              aria-label="Roll"
+              onChange={(e) => setContact({ ...contact, role: e.target.value })} />
+            <button type="button" onClick={addContact} disabled={!contact.name}
+              className="rounded-[var(--radius-ctl)] border border-border-firm px-3 py-2.5 text-[13px] font-medium text-ink-2 hover:text-ink disabled:opacity-40">
+              Lägg till
+            </button>
           </div>
-          <div className="field"><label className="label">Privata dagar (av total) <Tip text="Om du stannar 2 helgdagar privat efter ett 3-dagars affärsmöte: skriv 2 här. Hotell + flyg fördelas proportionellt så att du bara drar av affärsdelen." /></label>
-            <input className="input num" type="number" min="0" value={t.private_days} onChange={(e) => setT({ ...t, private_days: e.target.value })} />
+        </section>
+
+        <section className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+          <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Praktiskt</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Färdmedel">
+              <select className={inputCls} value={t.travel_mode}
+                onChange={(e) => setT({ ...t, travel_mode: e.target.value })}>
+                <option value="flight">Flyg</option>
+                <option value="train">Tåg</option>
+                <option value="car">Bil</option>
+                <option value="mixed">Blandat</option>
+                <option value="other">Annat</option>
+              </select>
+            </Field>
+            <Field label="Reg-nummer" hint="Om du körde egen bil — kopplar ihop resan med körjournalen.">
+              <input className={inputCls} value={t.vehicle_reg}
+                onChange={(e) => setT({ ...t, vehicle_reg: e.target.value.toUpperCase() })} placeholder="ABC123" />
+            </Field>
+            <Field label="Beräknad kostnad">
+              <input className={inputCls} type="number" inputMode="decimal" value={t.estimated_cost}
+                onChange={(e) => setT({ ...t, estimated_cost: e.target.value })} />
+            </Field>
+            <Field label="Valuta">
+              <select className={inputCls} value={t.currency}
+                onChange={(e) => setT({ ...t, currency: e.target.value })}>
+                {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Måltider"
+              hint="Traktamente är ett schablonbelopp per dag. Väljer du kvitton måste varje måltid ha ett underlag.">
+              <select className={inputCls} value={t.uses_traktamente ? "1" : "0"}
+                onChange={(e) => setT({ ...t, uses_traktamente: e.target.value === "1" })}>
+                <option value="1">Traktamente enligt schablon</option>
+                <option value="0">Faktiska kvitton</option>
+              </select>
+            </Field>
+            <Field label="Privata dagar"
+              hint="Dagar som inte är tjänst. Hotell och flyg fördelas proportionellt.">
+              <input className={inputCls} type="number" inputMode="numeric" min={0} max={days}
+                value={t.private_days}
+                onChange={(e) => setT({ ...t, private_days: e.target.value })} />
+            </Field>
+            <Field label="Anteckningar" wide>
+              <textarea className={inputCls} rows={2} value={t.notes}
+                onChange={(e) => setT({ ...t, notes: e.target.value })} />
+            </Field>
           </div>
-          <div className="field"><label className="label">Måltider <Tip text="Traktamente schablon: 290 kr/dag inrikes 2026, varierar utomlands (Berlin 549, London 561, NYC 700). Receipts: spara kvitton och dra av faktiska. Kan inte kombineras inom samma resa." /></label>
-            <select className="select" value={t.uses_traktamente ? "1" : "0"} onChange={(e) => setT({ ...t, uses_traktamente: e.target.value === "1" })}>
-              <option value="1">Traktamente schablon</option>
-              <option value="0">Faktiska kvitton</option>
-            </select>
-          </div>
+        </section>
+
+        <div className="flex flex-wrap gap-2.5 pb-2">
+          <button type="submit" disabled={busy}
+            className="rounded-[var(--radius-ctl)] bg-brand px-4 py-3 text-[14px] font-semibold text-brand-ink disabled:opacity-40">
+            {busy ? "Sparar…" : "Spara resan"}
+          </button>
+          <button type="button" onClick={() => router.push("/resor")} disabled={busy}
+            className="rounded-[var(--radius-ctl)] border border-border-firm px-4 py-3 text-[14px] font-medium text-ink-2">
+            Avbryt
+          </button>
         </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 14 }}>
-        <label className="label">Anteckningar</label>
-        <textarea className="textarea" rows={3} value={t.notes} onChange={(e) => setT({ ...t, notes: e.target.value })} placeholder="Övriga noteringar (t.ex. 'familj joinade utan kostnad', 'hotell betalades av kund', etc.)" />
-      </div>
-
-      <button className="btn btn-block" onClick={save} disabled={busy}>{busy ? "Sparar..." : "Skapa resa"}</button>
-      <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
-        Efter att du skapat resan kan du koppla kvitton, körjournal-resor och dokument (boarding pass, hotellfaktura, mässbiljett) till denna resa.
-      </div>
-    </>
+      </form>
+    </div>
   );
 }

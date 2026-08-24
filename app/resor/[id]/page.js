@@ -1,194 +1,289 @@
+/* app/resor/[id]/page.js — DIRECTION C
+ *
+ * Migrated 2026-08-24. The important change is not the colour.
+ *
+ * THE CANDIDATE QUERIES WERE UNSCOPED. Six reads, none filtered by user_id:
+ *
+ *   sb.from("studio_receipts").select("*").is("business_trip_id", null)
+ *     .gte("receipt_date", trip.start_date)...
+ *
+ * Once migration 006 allowed a revisor to read someone else's books, RLS returned
+ * BOTH owners' rows — so this page offered YOUR receipts as candidates to attach to
+ * THEIR trip, and attaching one would have moved a verifikation between two people's
+ * accounts. Everything is scoped to the trip's own owner now, and the trip itself is
+ * fetched by owner too rather than by id alone.
+ *
+ * The checklist at the bottom also stopped using emoji as its only state signal —
+ * "✅"/"⬜" carried the meaning with nothing else, and a screen reader announces those
+ * as "vit tung bock" and "vit kvadrat".
+ */
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { serverClient } from "@/lib/supabase-server";
-import { fmtMoney, fmtDate } from "@/lib/currency";
+import { getActiveOwnerId } from "@/lib/access";
+import { money, num, dateISO } from "@/lib/format";
 import TripActions from "./actions";
 
 export const dynamic = "force-dynamic";
 
+const STATUS = {
+  planned:   { label: "Planerad",  tone: "bg-raised text-ink-3" },
+  ongoing:   { label: "Pågår",     tone: "bg-warn-bg text-warn" },
+  completed: { label: "Genomförd", tone: "bg-good-bg text-good" },
+  cancelled: { label: "Inställd",  tone: "bg-raised text-ink-3" },
+};
+
+function Block({ label, children }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="micro-label">{label}</span>
+      <div className="text-[13.5px] leading-relaxed text-ink">{children}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value, note }) {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-[var(--radius-card)] border border-border bg-surface p-4">
+      <span className="micro-label">{label}</span>
+      <span className="tnum text-[20px] font-medium tracking-[-0.02em]">{value}</span>
+      {note && <span className="text-[11.5px] text-ink-3">{note}</span>}
+    </div>
+  );
+}
+
+function Check({ done, children, note }) {
+  return (
+    <li className="flex items-start gap-2.5 py-1.5">
+      <span aria-hidden="true"
+        className={`mt-[3px] grid size-[15px] shrink-0 place-items-center rounded-[4px] font-mono text-[10px] ${
+          done ? "bg-good-bg text-good" : "border border-border-firm text-transparent"
+        }`}>
+        ✓
+      </span>
+      <span className="text-[13.5px] leading-relaxed text-ink-2">
+        <span className="sr-only">{done ? "Klart: " : "Saknas: "}</span>
+        <span className={done ? "text-ink-2" : "text-ink"}>{children}</span>
+        {note && <span className="text-ink-3"> — {note}</span>}
+      </span>
+    </li>
+  );
+}
+
 export default async function TripView({ params }) {
   const { id } = await params;
   const sb = await serverClient();
-  const { data: trip } = await sb.from("studio_business_trips").select("*, studio_clients(name, email)").eq("id", id).maybeSingle();
+  const ownerId = await getActiveOwnerId();
+
+  const { data: trip } = await sb
+    .from("studio_business_trips").select("*, studio_clients(name, email)")
+    .eq("id", id).eq("user_id", ownerId).maybeSingle();
   if (!trip) return notFound();
 
-  // Auto-suggest items in the date range that aren't already linked
-  const [{ data: linkedReceipts }, { data: candidateReceipts }, { data: linkedMileage }, { data: candidateMileage }, { data: linkedDocs }, { data: candidateDocs }] = await Promise.all([
-    sb.from("studio_receipts").select("*").eq("business_trip_id", trip.id).order("receipt_date"),
-    sb.from("studio_receipts").select("*").is("business_trip_id", null).gte("receipt_date", trip.start_date).lte("receipt_date", trip.end_date).order("receipt_date"),
-    sb.from("studio_trips").select("*").eq("business_trip_id", trip.id).order("trip_date"),
-    sb.from("studio_trips").select("*").is("business_trip_id", null).gte("trip_date", trip.start_date).lte("trip_date", trip.end_date).order("trip_date"),
-    sb.from("studio_documents").select("*").eq("business_trip_id", trip.id).order("issued_date"),
-    sb.from("studio_documents").select("*").is("business_trip_id", null).gte("issued_date", trip.start_date).lte("issued_date", trip.end_date).order("issued_date"),
+  /* Every one of these is scoped to the TRIP's owner. See the header. */
+  const own = (q) => q.eq("user_id", trip.user_id);
+
+  const [{ data: linkedReceipts }, { data: candidateReceipts },
+         { data: linkedMileage }, { data: candidateMileage },
+         { data: linkedDocs }, { data: candidateDocs }] = await Promise.all([
+    own(sb.from("studio_receipts").select("*").eq("business_trip_id", trip.id)).order("receipt_date"),
+    own(sb.from("studio_receipts").select("*").is("business_trip_id", null)
+        .gte("receipt_date", trip.start_date).lte("receipt_date", trip.end_date)).order("receipt_date"),
+    own(sb.from("studio_trips").select("*").eq("business_trip_id", trip.id)).order("trip_date"),
+    own(sb.from("studio_trips").select("*").is("business_trip_id", null)
+        .gte("trip_date", trip.start_date).lte("trip_date", trip.end_date)).order("trip_date"),
+    own(sb.from("studio_documents").select("*").eq("business_trip_id", trip.id)).order("issued_date"),
+    own(sb.from("studio_documents").select("*").is("business_trip_id", null)
+        .gte("issued_date", trip.start_date).lte("issued_date", trip.end_date)).order("issued_date"),
   ]);
 
   const ccy = trip.currency || "SEK";
-  const totalReceipts = (linkedReceipts || []).reduce((a, r) => a + Number(r.total || 0), 0);
-  const totalMileage = (linkedMileage || []).reduce((a, m) => a + Number(m.deduction || 0), 0);
+  const receipts = linkedReceipts || [], mileage = linkedMileage || [], docs = linkedDocs || [];
+  const totalReceipts = receipts.reduce((a, r) => a + Number(r.total || 0), 0);
+  const totalMileage = mileage.reduce((a, m) => a + Number(m.deduction || 0), 0);
+  const drove = trip.travel_mode === "car" || trip.travel_mode === "mixed";
+  const s = STATUS[trip.status] || { label: trip.status, tone: "bg-raised text-ink-3" };
+  const span = trip.end_date && trip.end_date !== trip.start_date
+    ? `${dateISO(trip.start_date)} → ${dateISO(trip.end_date)}` : dateISO(trip.start_date);
 
   return (
-    <>
-      <div className="spread" style={{ marginBottom: 14 }}>
-        <div>
-          <Link href="/resor" className="muted" style={{ fontSize: 13 }}>← Alla resor</Link>
-          <h1 className="h1" style={{ marginTop: 4 }}>{trip.title}</h1>
-          <div className="muted">
-            {trip.destination || "—"}{trip.country_code && ` (${trip.country_code})`} · {fmtDate(trip.start_date)}{trip.end_date && trip.end_date !== trip.start_date ? ` → ${fmtDate(trip.end_date)}` : ""}
-            {" · "}<span className={`badge badge-${trip.status === "completed" ? "paid" : trip.status === "ongoing" ? "sent" : "draft"}`}>{trip.status}</span>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Link href="/resor" className="font-mono text-[11.5px] text-ink-3 hover:text-ink-2">← Alla resor</Link>
+          <h1 className="mt-1.5 truncate text-[21px] font-medium tracking-[-0.015em]">{trip.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`inline-block rounded px-2 py-0.5 font-mono text-[10.5px] font-medium ${s.tone}`}>{s.label}</span>
+            <span className="font-mono text-[11.5px] text-ink-3">{span}</span>
+            {trip.destination && <span className="text-[12.5px] text-ink-2">{trip.destination}</span>}
+            {trip.country_code && trip.country_code !== "SE" && (
+              <span className="font-mono text-[11px] text-ink-3">{trip.country_code}</span>
+            )}
           </div>
         </div>
         <TripActions trip={trip} />
       </div>
 
-      {/* ─── Skatteverket audit-trail block — this is what they ask for ─── */}
-      <div className="card" style={{ marginBottom: 14, background: "var(--accent-soft)" }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Skatteverket-revisionsspår</h2>
-        <div className="grid-2">
-          <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: ".05em" }}>Syfte</div>
-            <div style={{ fontWeight: 600, marginTop: 4, whiteSpace: "pre-wrap" }}>{trip.purpose || "—"}</div>
-            {trip.conference && <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Konferens: {trip.conference}</div>}
-          </div>
-          <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: ".05em" }}>Kontakter / deltagare</div>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-1 text-[15.5px] font-medium tracking-[-0.01em]">Underlag för Skatteverket</h2>
+        <p className="mb-4 text-[12.5px] leading-relaxed text-ink-3">
+          Det här är vad som efterfrågas om avdraget ifrågasätts, upp till sex år efteråt.
+        </p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Block label="Syfte">
+            <span className="whitespace-pre-wrap">{trip.purpose || <span className="text-ink-3">Inte angivet</span>}</span>
+            {trip.conference && <div className="mt-1.5 text-[12.5px] text-ink-2">Konferens: {trip.conference}</div>}
+          </Block>
+          <Block label="Kontakter och deltagare">
             {Array.isArray(trip.contacts) && trip.contacts.length > 0 ? (
-              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              <ul className="flex flex-col gap-0.5">
                 {trip.contacts.map((c, i) => (
-                  <li key={i}><strong>{c.name}</strong>{c.company ? ` — ${c.company}` : ""}{c.role ? ` (${c.role})` : ""}</li>
+                  <li key={i}>
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-ink-2">
+                      {c.company ? ` — ${c.company}` : ""}{c.role ? ` (${c.role})` : ""}
+                    </span>
+                  </li>
                 ))}
               </ul>
-            ) : <div className="muted">Inga kontakter loggade.</div>}
-          </div>
-          <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: ".05em" }}>Färdmedel</div>
-            <div style={{ fontWeight: 600, marginTop: 4 }}>{trip.travel_mode || "—"}{trip.vehicle_reg && ` · ${trip.vehicle_reg}`}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: ".05em" }}>Måltider</div>
-            <div style={{ fontWeight: 600, marginTop: 4 }}>{trip.uses_traktamente ? "Traktamente schablon" : "Faktiska kvitton"}</div>
-          </div>
-          {trip.private_days > 0 && (
-            <div style={{ gridColumn: "1/-1" }}>
-              <div className="alert alert-info" style={{ marginTop: 6, marginBottom: 0 }}>
-                <strong>{trip.private_days} privata dagar</strong> — fördela hotell/flyg proportionellt vid avdrag.
-              </div>
-            </div>
-          )}
+            ) : <span className="text-ink-3">Inga kontakter loggade</span>}
+          </Block>
+          <Block label="Färdmedel">
+            {trip.travel_mode || <span className="text-ink-3">Inte angivet</span>}
+            {trip.vehicle_reg && <span className="text-ink-2"> · {trip.vehicle_reg}</span>}
+          </Block>
+          <Block label="Måltider">
+            {trip.uses_traktamente ? "Traktamente enligt schablon" : "Faktiska kvitton"}
+          </Block>
         </div>
+
+        {trip.private_days > 0 && (
+          <p className="mt-4 rounded-[var(--radius-ctl)] bg-warn-bg px-3.5 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
+            <span className="font-medium text-ink">{num(trip.private_days)} privata dagar.</span>{" "}
+            Hotell och flyg ska fördelas proportionellt — bara den del som hör till
+            tjänsteresan är avdragsgill.
+          </p>
+        )}
         {trip.notes && (
-          <div style={{ marginTop: 12, padding: 10, background: "var(--bg-card)", borderRadius: 9, fontSize: 13 }}>
-            <strong>Anteckningar:</strong> {trip.notes}
-          </div>
+          <p className="mt-4 border-t border-border pt-3.5 text-[13px] leading-relaxed text-ink-2">{trip.notes}</p>
         )}
+      </section>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat label="Kvitton" value={num(receipts.length)}
+          note={money(totalReceipts, { decimals: 0, currency: ccy }).text} />
+        <Stat label="Körjournal" value={`${num(mileage.length)} resor`}
+          note={`Avdrag ${money(totalMileage, { decimals: 0 }).text}`} />
+        <Stat label="Dokument" value={num(docs.length)} note="Boardingkort, hotellfaktura…" />
       </div>
 
-      {/* ─── Summary numbers ─── */}
-      <div className="grid-3" style={{ marginBottom: 14 }}>
-        <div className="stat"><div className="stat-label">Kvitton</div><div className="stat-value">{(linkedReceipts || []).length}</div><div className="stat-delta">{fmtMoney(totalReceipts, ccy, { fractionDigits: 0 })}</div></div>
-        <div className="stat"><div className="stat-label">Körjournal</div><div className="stat-value">{(linkedMileage || []).length} resor</div><div className="stat-delta">Avdrag {fmtMoney(totalMileage, "SEK", { fractionDigits: 0 })}</div></div>
-        <div className="stat"><div className="stat-label">Dokument</div><div className="stat-value">{(linkedDocs || []).length}</div><div className="stat-delta">Boarding pass, hotellfaktura, etc.</div></div>
-      </div>
-
-      {/* ─── Linked receipts ─── */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Kvitton kopplade till resan</h2>
-        {(linkedReceipts || []).length === 0 ? (
-          <div className="muted" style={{ fontSize: 13 }}>Inga kvitton kopplade ännu.</div>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-3 text-[15.5px] font-medium tracking-[-0.01em]">Kvitton</h2>
+        {receipts.length === 0 ? (
+          <p className="text-[13px] text-ink-3">Inga kvitton kopplade ännu.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="table table-stack">
-              <thead><tr><th>Datum</th><th>Leverantör</th><th>Kategori</th><th className="num">Belopp</th></tr></thead>
-              <tbody>
-                {linkedReceipts.map((r) => (
-                  <tr key={r.id}>
-                    <td data-label="Datum">{fmtDate(r.receipt_date)}</td>
-                    <td data-label="Leverantör">{r.vendor}</td>
-                    <td data-label="Kategori" className="muted">{r.category} <span style={{ fontSize: 11 }}>({r.bas_account})</span></td>
-                    <td data-label="Belopp" className="num">{fmtMoney(r.total, r.currency || "SEK", { fractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col">
+            {receipts.map((r) => (
+              <div key={r.id} className="grid grid-cols-[1fr_auto] items-baseline gap-3 border-b border-border py-2.5 last:border-b-0">
+                <span className="min-w-0">
+                  <span className="block truncate text-[13.5px] text-ink">{r.vendor}</span>
+                  <span className="font-mono text-[11px] text-ink-3">
+                    {dateISO(r.receipt_date)}{r.category ? ` · ${r.category}` : ""}
+                  </span>
+                </span>
+                <span className="tnum shrink-0 font-mono text-[13px]">
+                  {money(r.total, { decimals: 2, currency: r.currency || "SEK" }).text}
+                </span>
+              </div>
+            ))}
           </div>
         )}
-
         {(candidateReceipts || []).length > 0 && (
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600, padding: "6px 0" }}>
-              {candidateReceipts.length} kvitton hittades i resans datumintervall — koppla?
+          <details className="mt-3.5 border-t border-border pt-3.5">
+            <summary className="cursor-pointer text-[13px] font-medium text-ink-2">
+              {num(candidateReceipts.length)} kvitton ligger inom resans datum — koppla?
             </summary>
-            <div style={{ marginTop: 8 }}>
+            <div className="mt-3">
               <TripActions.AttachList trip={trip} kind="receipts" items={candidateReceipts} />
             </div>
           </details>
         )}
-      </div>
+      </section>
 
-      {/* ─── Linked mileage ─── */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Körjournal kopplad till resan</h2>
-        {(linkedMileage || []).length === 0 ? (
-          <div className="muted" style={{ fontSize: 13 }}>Inga körjournal-resor kopplade ännu.</div>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-3 text-[15.5px] font-medium tracking-[-0.01em]">Körjournal</h2>
+        {mileage.length === 0 ? (
+          <p className="text-[13px] text-ink-3">Inga körjournalresor kopplade ännu.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="table table-stack">
-              <thead><tr><th>Datum</th><th>Resa</th><th className="num">Km</th><th className="num">Avdrag</th></tr></thead>
-              <tbody>
-                {linkedMileage.map((m) => (
-                  <tr key={m.id}>
-                    <td data-label="Datum">{fmtDate(m.trip_date)}</td>
-                    <td data-label="Resa">{m.from_address} → {m.to_address}</td>
-                    <td data-label="Km" className="num">{m.km}</td>
-                    <td data-label="Avdrag" className="num">{fmtMoney(m.deduction, "SEK", { fractionDigits: 0 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex flex-col">
+            {mileage.map((m) => (
+              <div key={m.id} className="grid grid-cols-[1fr_auto] items-baseline gap-3 border-b border-border py-2.5 last:border-b-0">
+                <span className="min-w-0">
+                  <span className="block truncate text-[13.5px] text-ink">{m.from_address} → {m.to_address}</span>
+                  <span className="font-mono text-[11px] text-ink-3">{dateISO(m.trip_date)} · {num(m.km)} km</span>
+                </span>
+                <span className="tnum shrink-0 font-mono text-[13px]">
+                  {money(m.deduction, { decimals: 0 }).text}
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {(candidateMileage || []).length > 0 && (
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>{candidateMileage.length} körjournal-resor matchar datum — koppla?</summary>
-            <div style={{ marginTop: 8 }}><TripActions.AttachList trip={trip} kind="mileage" items={candidateMileage} /></div>
+          <details className="mt-3.5 border-t border-border pt-3.5">
+            <summary className="cursor-pointer text-[13px] font-medium text-ink-2">
+              {num(candidateMileage.length)} resor matchar datumen — koppla?
+            </summary>
+            <div className="mt-3"><TripActions.AttachList trip={trip} kind="mileage" items={candidateMileage} /></div>
           </details>
         )}
-      </div>
+      </section>
 
-      {/* ─── Linked documents ─── */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Dokument (boarding pass, hotellfaktura, mässbiljett)</h2>
-        {(linkedDocs || []).length === 0 ? (
-          <div className="muted" style={{ fontSize: 13 }}>Inga dokument kopplade. Ladda upp i <Link href="/documents" style={{ textDecoration: "underline" }}>Arkiv</Link> och koppla hit, eller använd knappen nedan.</div>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-1 text-[15.5px] font-medium tracking-[-0.01em]">Dokument</h2>
+        <p className="mb-3 text-[12.5px] text-ink-3">Boardingkort, hotellfaktura, mässbiljett.</p>
+        {docs.length === 0 ? (
+          <p className="text-[13px] leading-relaxed text-ink-3">
+            Inga dokument kopplade. Ladda upp i{" "}
+            <Link href="/documents" className="underline">Arkiv</Link> och koppla hit.
+          </p>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
-            {linkedDocs.map((d) => (
-              <li key={d.id}><strong>{d.title}</strong> <span className="muted" style={{ fontSize: 12 }}>· {d.doc_type}</span></li>
+          <div className="flex flex-col">
+            {docs.map((d) => (
+              <div key={d.id} className="border-b border-border py-2.5 last:border-b-0">
+                <span className="block text-[13.5px] text-ink">{d.title}</span>
+                <span className="font-mono text-[11px] text-ink-3">{d.doc_type}</span>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
         {(candidateDocs || []).length > 0 && (
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>{candidateDocs.length} dokument matchar datum — koppla?</summary>
-            <div style={{ marginTop: 8 }}><TripActions.AttachList trip={trip} kind="documents" items={candidateDocs} /></div>
+          <details className="mt-3.5 border-t border-border pt-3.5">
+            <summary className="cursor-pointer text-[13px] font-medium text-ink-2">
+              {num(candidateDocs.length)} dokument matchar datumen — koppla?
+            </summary>
+            <div className="mt-3"><TripActions.AttachList trip={trip} kind="documents" items={candidateDocs} /></div>
           </details>
         )}
-      </div>
+      </section>
 
-      {/* ─── Doc-checklist (what Skatteverket asks for) ─── */}
-      <div className="card">
-        <h2 className="h2" style={{ marginTop: 0 }}>Dokumentationschecklist</h2>
-        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8, fontSize: 14 }}>
-          <li>{trip.purpose ? "✅" : "⬜"} Syfte loggat (varför reste du?)</li>
-          <li>{(trip.contacts || []).length > 0 ? "✅" : "⬜"} Kontakter/deltagare loggade</li>
-          <li>{(linkedReceipts || []).length > 0 ? "✅" : "⬜"} Minst ett kvitto kopplat (flyg, hotell, taxi...)</li>
-          <li>{(trip.travel_mode === "car" || trip.travel_mode === "mixed") ? ((linkedMileage || []).length > 0 ? "✅" : "⬜ Körjournal-resa kopplad") : "—"} {trip.travel_mode === "car" || trip.travel_mode === "mixed" ? "Körjournal kopplad (om du körde)" : "Inte tillämpligt"}</li>
-          <li>{(linkedDocs || []).length > 0 ? "✅" : "⬜"} Boarding pass / hotellfaktura / mässbiljett uppladdat</li>
-          <li>{trip.notes || trip.conference ? "✅" : "⬜"} Anteckningar eller konferensnamn (rekommenderat)</li>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="mb-3 text-[15.5px] font-medium tracking-[-0.01em]">Vad som finns på plats</h2>
+        <ul className="flex flex-col">
+          <Check done={Boolean(trip.purpose)}>Syftet med resan är loggat</Check>
+          <Check done={(trip.contacts || []).length > 0}>Kontakter eller deltagare är loggade</Check>
+          <Check done={receipts.length > 0}>Minst ett kvitto är kopplat</Check>
+          {drove && <Check done={mileage.length > 0}>Körjournalen är kopplad</Check>}
+          <Check done={docs.length > 0}>Boardingkort eller hotellfaktura är uppladdad</Check>
+          <Check done={Boolean(trip.notes || trip.conference)} note="rekommenderat">Anteckningar eller konferensnamn</Check>
         </ul>
-        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-          Skatteverket kan begära dessa upp till 6 år efter inkomståret. Allt sparas automatiskt 7 år.
-        </div>
-      </div>
-    </>
+        <p className="mt-3.5 border-t border-border pt-3 text-[12px] leading-relaxed text-ink-3">
+          Skatteverket kan begära det här i upp till sex år efter inkomståret. Allt sparas
+          i sju enligt bokföringslagen.
+        </p>
+      </section>
+    </div>
   );
 }

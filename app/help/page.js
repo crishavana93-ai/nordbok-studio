@@ -131,79 +131,98 @@ const glossary = [
 
 export default function HelpPage() {
   return (
-    <>
-      <div style={{ marginBottom: 18 }}>
-        <h1 className="h1">Hjälp & funktioner</h1>
-        <div className="muted">Kort genomgång av vad varje del av Nordbok Studio gör — och varför.</div>
+    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+
+      <div>
+        <h1 className="text-[21px] font-medium tracking-[-0.015em]">Hjälp</h1>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+          Vad varje del av appen gör, och varför den finns.
+        </p>
       </div>
 
-      <Link href="/help/avdrag" className="card" style={{ marginBottom: 18, display: "block", textDecoration: "none", color: "inherit", background: "linear-gradient(135deg, var(--accent-soft), var(--bg-card))" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 28 }}>📖</span>
-          <div>
-            <strong style={{ fontSize: 16 }}>Avdragsguide — vad är avdragsgillt?</strong>
-            <div className="muted" style={{ fontSize: 13 }}>Resor, måltider, IT, hemkontor, representation, OSS — komplett genomgång med BAS-konton.</div>
-          </div>
-        </div>
+      <Link href="/help/avdrag"
+        className="rounded-[var(--radius-card)] border border-border-firm bg-surface p-4 sm:p-5">
+        <span className="micro-label">Guide</span>
+        <p className="mt-1.5 text-[15.5px] font-medium tracking-[-0.01em]">Vad är avdragsgillt?</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+          Resor, måltider, IT, hemkontor, representation och OSS — med BAS-konton och
+          de belopp som gäller i år.
+        </p>
       </Link>
 
-      <div className="card" style={{ marginBottom: 18 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Snabbstart — från noll till första faktura</h2>
-        <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
-          <li><strong>Inställningar</strong> → fyll i företagsnamn, personnummer, F-skatt, IBAN/Bankgiro. (Eller gå igenom <Link href="/welcome" style={{ textDecoration: "underline" }}>välkomstguiden</Link> igen.)</li>
-          <li><strong>Kunder</strong> → lägg till din första kund.</li>
-          <li><strong>Fakturor → + Ny faktura</strong> → välj kund, lägg till en rad, klicka "Spara &amp; skicka".</li>
-          <li><strong>Deadlines</strong> → klicka "Importera Skatteverket-deadlines" så hamnar moms Q1–Q4, NE-bilaga och F-skatt-betalningar på plats.</li>
-          <li><strong>Kvitton</strong> → varje gång du betalar något företagsrelaterat: snappa kvittot med kameran direkt på telefonen.</li>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Från noll till första fakturan</h2>
+        <ol className="mt-3 flex flex-col">
+          {[
+            ["Inställningar", "Företagsnamn, personnummer, F-skatt och ett betalsätt. Utan betalsätt stoppas fakturan innan den skickas.", "/settings"],
+            ["Kunder", "Namn och adress krävs enligt mervärdesskattelagen innan du kan fakturera någon.", "/clients"],
+            ["Ny faktura", "Välj kund, lägg till en rad, spara utkastet. Numret tilldelas först vid utskicket.", "/invoices/new"],
+            ["Deadlines", "Importera Skatteverkets datum — moms Q1–Q4, NE-bilaga och F-skatt.", "/deadlines"],
+            ["Kvitton", "Fotografera kvittot direkt när du betalar. Bilden ÄR verifikationen sedan 2024.", "/receipts"],
+          ].map(([title, why, href], i) => (
+            <li key={href} className="grid grid-cols-[24px_1fr] gap-3 border-b border-border py-3 last:border-b-0">
+              <span aria-hidden="true" className="mt-[1px] font-mono text-[12px] text-ink-3">{i + 1}</span>
+              <span>
+                <Link href={href} className="text-[14px] font-medium text-ink underline decoration-border-firm underline-offset-2">
+                  {title}
+                </Link>
+                <span className="mt-0.5 block text-[12.5px] leading-relaxed text-ink-2">{why}</span>
+              </span>
+            </li>
+          ))}
         </ol>
-      </div>
+      </section>
 
-      <h2 className="h2">Funktioner — sektion för sektion</h2>
-      <div className="grid-2" style={{ marginBottom: 22 }}>
-        {sections.map((s) => (
-          <Link key={s.href} href={s.href} className="card" style={{ textDecoration: "none", color: "inherit", display: "block" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <span style={{ fontSize: 24 }}>{s.icon}</span>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{s.title}</h3>
+      <section className="flex flex-col gap-3">
+        <h2 className="px-1 text-[15.5px] font-medium tracking-[-0.01em]">Sektion för sektion</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {sections.map((s) => (
+            <Link key={s.href} href={s.href}
+              className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-surface p-4">
+              <h3 className="text-[14.5px] font-medium tracking-[-0.01em]">{s.title}</h3>
+              <p className="text-[12.5px] leading-relaxed text-ink-2">{s.blurb}</p>
+              <ul className="flex flex-col gap-1 text-[12.5px] leading-relaxed text-ink-3">
+                {s.use.map((u, i) => <li key={i}>· {u}</li>)}
+              </ul>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Ordlista</h2>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          Termerna behålls på svenska — ”ruta 48” går att söka på hos Skatteverket, det gör inte ”box 48”.
+        </p>
+        <dl className="mt-3 flex flex-col">
+          {glossary.map((g) => (
+            <div key={g.term} className="grid gap-1 border-b border-border py-3 last:border-b-0 sm:grid-cols-[190px_1fr] sm:gap-4">
+              <dt className="text-[13.5px] font-medium text-ink">{g.term}</dt>
+              <dd className="m-0 text-[13px] leading-relaxed text-ink-2">{g.what}</dd>
             </div>
-            <div className="muted" style={{ fontSize: 13.5, marginBottom: 8 }}>{s.blurb}</div>
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--text-soft)" }}>
-              {s.use.map((u, i) => <li key={i} style={{ marginBottom: 4 }}>{u}</li>)}
-            </ul>
-          </Link>
-        ))}
-      </div>
+          ))}
+        </dl>
+      </section>
 
-      <h2 className="h2">Ordlista — svensk skattevokabulär förklarad</h2>
-      <div className="card" style={{ padding: 0 }}>
-        <table className="table">
-          <tbody>
-            {glossary.map((g) => (
-              <tr key={g.term}>
-                <td style={{ width: 220, verticalAlign: "top", fontWeight: 600 }}>{g.term}</td>
-                <td style={{ color: "var(--text-soft)" }}>{g.what}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card" style={{ marginTop: 18 }}>
-        <h2 className="h2" style={{ marginTop: 0 }}>Vad gör appen automatiskt?</h2>
-        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
-          <li><strong>Veckorapport</strong> via mail varje måndag 08:00 — sammanfattning av YTD, förfallna fakturor och kommande deadlines.</li>
-          <li><strong>Push-notiser</strong> på telefonen dagen innan en deadline (om du aktiverat det).</li>
-          <li><strong>Påminnelse</strong> skapas automatiskt 3 dagar efter en fakturas förfallodatum om kunden inte betalat.</li>
-          <li><strong>Bokföringsregler</strong>: 7-årig arkivering, BAS-kontoplan-mappning, F-skatt-stämpel, ROT/RUT-beräkning, OSS-tröskel, reverse-charge för EU B2B.</li>
-          <li><strong>Säkerhet</strong>: all data är krypterad i Supabase; bara du kan se din data (Row-Level Security per användare).</li>
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-[15.5px] font-medium tracking-[-0.01em]">Vad appen gör åt dig</h2>
+        <ul className="mt-3 flex flex-col gap-2.5 text-[13px] leading-relaxed text-ink-2">
+          <li>· <span className="font-medium text-ink">Veckorapport</span> på mejl varje måndag — året hittills, förfallna fakturor och kommande deadlines.</li>
+          <li>· <span className="font-medium text-ink">Påminnelse</span> skapas tre dagar efter en fakturas förfallodatum om den inte är betald.</li>
+          <li>· <span className="font-medium text-ink">Kontroll före utskick</span> — en faktura som saknar något mervärdesskattelagen kräver skickas inte alls.</li>
+          <li>· <span className="font-medium text-ink">Fakturanummer</span> tilldelas vid utskicket, under lås, så serien aldrig får luckor.</li>
+          <li>· <span className="font-medium text-ink">Sju års arkivering</span> med kontrollsummor, så en kvittobild bevisligen är den som bokfördes.</li>
         </ul>
-      </div>
+        <p className="mt-3.5 border-t border-border pt-3 text-[12px] leading-relaxed text-ink-3">
+          Push-notiser är inte igång ännu. Delad åtkomst för revisor ger läsrätt, aldrig skrivrätt.
+        </p>
+      </section>
 
-      <div style={{ textAlign: "center", marginTop: 22 }}>
-        <a href="https://docs.skatteverket.se" target="_blank" rel="noreferrer" className="muted" style={{ fontSize: 13 }}>
-          Officiella regler: Skatteverket →
+      <p className="px-1 pb-2 text-[12.5px]">
+        <a href="https://www.skatteverket.se" target="_blank" rel="noreferrer" className="text-ink-3 underline">
+          Officiella regler hos Skatteverket →
         </a>
-      </div>
-    </>
+      </p>
+    </div>
   );
 }
