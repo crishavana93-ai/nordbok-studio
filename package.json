@@ -12,7 +12,9 @@
     "import-kvitton": "node scripts/importera-kvitton.mjs",
     "fx": "node scripts/backfill-fx.mjs",
     "aterstall": "node scripts/aterstall.mjs",
-    "test": "node tests/skatt.test.mjs"
+    "test": "node tests/skatt.test.mjs",
+    "sie": "node scripts/sie.mjs",
+    "kontera": "node scripts/kontera.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
