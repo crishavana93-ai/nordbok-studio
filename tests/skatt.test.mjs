@@ -18,7 +18,7 @@ import { pathPolicy } from "../lib/path-policy.js";
 import { beraknaSkatt, grundavdrag2026, SKATT_2026 } from "../lib/skatt-2026.js";
 import { beraknaResultat } from "../lib/resultat.js";
 import { paskdagen, arBankdag, nastaBankdag } from "../lib/helgdagar.js";
-import { momsStatus, deadlineForKvartal, kvartal } from "../lib/moms-status.js";
+import { momsStatus, deadlineForKvartal, deadlineFor, kvartal, manad, helar, nastaPeriod } from "../lib/moms-status.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -265,7 +265,7 @@ chk("Q2 slutar 30 juni", kvartal(2026, 2).end, "2026-06-30");
 /* Den missade deklarationen som föranledde hela filen: registrerad 2026-04-29,
    Q2 skulle ha lämnats senast 17 augusti, och den 24:e var ingenting lämnat. */
 console.log("\n── momsdeklaration: status ──");
-const MS = momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24", lamnade: [] });
+const MS = momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24", periodTyp: "kvartal", lamnade: [] });
 chk("första perioden är Q2 2026", MS.perioder[0].key, "2026-Q2");
 chk("Q2 är försenad", MS.perioder[0].status, "försenad");
 chk("sju dagar sen", MS.perioder[0].dagar_forsenad, 7);
@@ -273,13 +273,37 @@ chk("förseningsavgift 625 kr", MS.perioder[0].forseningsavgift, 625);
 chk("Q3 pågår fortfarande", MS.perioder[1].status, "pågående");
 chk("en försenad period", MS.forsenade.length, 1);
 chk("lämnad period är inte försenad",
-    momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24",
+    momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-24", periodTyp: "kvartal",
                  lamnade: [{ period_key: "2026-Q2", lamnad_at: "2026-08-14T10:00:00Z" }] }).forsenade.length, 0);
-chk("på deadlinedagen är man i tid", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-17" }).forsenade.length, 0);
-chk("dagen efter är man sen", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-18" }).forsenade.length, 1);
-chk("utan registreringsdatum: ingen gissning", momsStatus({ registreradFrom: null, idag: "2026-08-24" }).saknarRegistreringsdatum, true);
+chk("på deadlinedagen är man i tid", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-17", periodTyp: "kvartal" }).forsenade.length, 0);
+chk("dagen efter är man sen", momsStatus({ registreradFrom: "2026-04-29", idag: "2026-08-18", periodTyp: "kvartal" }).forsenade.length, 1);
+chk("utan registreringsdatum: ingen gissning", momsStatus({ registreradFrom: null, idag: "2026-08-24", periodTyp: "kvartal" }).saknarRegistreringsdatum, true);
 chk("avregistrering avslutar serien",
-    momsStatus({ registreradFrom: "2026-01-01", avregistreradFrom: "2026-04-01", idag: "2026-12-01" }).perioder.length, 2);
+    momsStatus({ registreradFrom: "2026-01-01", avregistreradFrom: "2026-04-01", idag: "2026-12-01", periodTyp: "kvartal" }).perioder.length, 2);
+
+
+/* ── redovisningsperioden avgör allt ───────────────────────────────────────
+   Samma verksamhet, samma dag, samma data — tre olika besked beroende på
+   vilken period Skatteverket satt. Därför gissas den aldrig. */
+console.log("\n── redovisningsperiod: månad, kvartal, helår ──");
+chk("månad jan 2026 → 12 mars", deadlineFor(manad(2026, 1)), "2026-03-12");
+chk("månad jun 2026 → 17 augusti", deadlineFor(manad(2026, 6)), "2026-08-17");
+chk("månad nov 2026 → 18 jan 2027 (17:e söndag)", deadlineFor(manad(2026, 11)), "2027-01-18");
+chk("månad ≥40 Mkr: jan → 26 februari", deadlineFor(manad(2026, 1), { storOmsattning: true }), "2026-02-26");
+chk("månad ≥40 Mkr: mars → 27 april (26:e söndag)", deadlineFor(manad(2026, 3), { storOmsattning: true }), "2026-04-27");
+chk("helår utan EU-handel → 12 maj året efter", deadlineFor(helar(2026)), "2027-05-12");
+chk("helår med EU-handel → 26 februari", deadlineFor(helar(2026), { euHandel: true }), "2027-02-26");
+chk("februari skottår", manad(2028, 2).end, "2028-02-29");
+chk("nästa efter december", nastaPeriod(manad(2026, 12)).key, "2027-01");
+chk("nästa efter Q4", nastaPeriod(kvartal(2026, 4)).key, "2027-Q1");
+
+const BAS = { registreradFrom: "2026-04-29", idag: "2026-08-24", lamnade: [] };
+chk("kvartal: en försenad", momsStatus({ ...BAS, periodTyp: "kvartal" }).forsenade.length, 1);
+chk("helår: ingen försenad", momsStatus({ ...BAS, periodTyp: "helar" }).forsenade.length, 0);
+chk("månad: tre försenade", momsStatus({ ...BAS, periodTyp: "manad" }).forsenade.map((p) => p.key), ["2026-04", "2026-05", "2026-06"]);
+chk("utan periodtyp: ingen varning", momsStatus({ ...BAS }).saknarPeriodTyp, true);
+chk("utan periodtyp: noll perioder", momsStatus({ ...BAS }).perioder.length, 0);
+chk("okänd periodtyp fångas", momsStatus({ ...BAS, periodTyp: "vecka" }).okandPeriodTyp, "vecka");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);
