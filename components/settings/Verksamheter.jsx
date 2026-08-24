@@ -67,6 +67,7 @@ export default function Verksamheter() {
         name_type: draft.name_type || "brand",
         from_email: draft.from_email?.trim() || null,
         reply_to: draft.reply_to?.trim() || null,
+        bcc: draft.bcc?.trim() || null,
         invoice_footer: draft.invoice_footer?.trim() || null,
       });
       /* The unique index on one primary name per user surfaces here. Say what it means
@@ -97,7 +98,7 @@ export default function Verksamheter() {
   const used = new Set(rows.map((r) => r.venture));
   const blank = {
     venture: "", display_name: "", name_type: "brand",
-    from_email: "", reply_to: "", invoice_footer: "",
+    from_email: "", reply_to: "", bcc: "", invoice_footer: "",
   };
 
   if (!user) return null;
@@ -190,6 +191,14 @@ export default function Verksamheter() {
               <label className="label">Svar går till</label>
               <input className="input" type="email" value={draft.reply_to}
                 onChange={(e) => setDraft({ ...draft, reply_to: e.target.value })} />
+            </div>
+            <div className="field" style={{ gridColumn: "1/-1" }}>
+              <label className="label">Blindkopia</label>
+              <input className="input" type="email" value={draft.bcc || ""}
+                onChange={(e) => setDraft({ ...draft, bcc: e.target.value })} />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Lämna tom för att använda verksamhetens standardadress.
+              </div>
             </div>
             <div className="field" style={{ gridColumn: "1/-1" }}>
               <label className="label">Faktura-fot för den här verksamheten</label>

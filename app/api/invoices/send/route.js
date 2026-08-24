@@ -85,13 +85,74 @@ export async function POST(req) {
       );
     }
 
-    /* ── Allocate the number now, not before ───────────────────────────────── */
+    /* ── Everything that can fail must fail BEFORE a number is spent ───────── */
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const seller = sellerIdentity({ settings, venture, lang: invoice.language === "en" ? "en" : "sv" });
+    const fromName = seller.headerName || settings?.business_name || "Nordbok Studio";
+    const configured = seller.fromEmail || process.env.RESEND_FROM_EMAIL || null;
+    if (!configured) {
+      return NextResponse.json({
+        error: "Ingen avsändaradress är konfigurerad. Ange den under Inställningar → Verksamheter, och verifiera domänen hos e-postleverantören.",
+      }, { status: 400 });
+    }
+    /* Accept either a bare address or an already-formatted "Name <addr>" string. */
+    const fromEmail = configured.includes("<") ? configured : `${fromName} <${configured}>`;
+
+    /* PRE-FLIGHT THE SENDING DOMAIN.
+     * The previous version carried a comment claiming this happened before allocation.
+     * It did not -- the check sat twenty lines below the allocator. So when the API key
+     * could not see the domain, 2026-0001 was handed out and then thrown away, and the
+     * series jumped to 2026-0002. A gap in a Swedish invoice series is the one defect
+     * this whole module exists to prevent, so the claim is now enforced by position:
+     * nothing below this block runs until the transport says it can send. */
+    const addr = (fromEmail.match(/<([^>]+)>/)?.[1] || fromEmail).trim();
+    const domain = addr.split("@")[1]?.toLowerCase();
+    try {
+      const { data: domains, error: dErr } = await resend.domains.list();
+      /* A listing failure is usually a bad or foreign API key. Say which, because
+         "domain is not verified" sent the last hour in the wrong direction. */
+      if (dErr) {
+        return NextResponse.json({
+          error: `E-postleverantören svarade inte på domänkontrollen: ${dErr.message}. Kontrollera att RESEND_API_KEY hör till samma konto som domänen.`,
+        }, { status: 502 });
+      }
+      const list = domains?.data || domains || [];
+      const match = list.find?.((d) => d.name?.toLowerCase() === domain);
+      if (!match) {
+        return NextResponse.json({
+          error: `Domänen ${domain} finns inte hos e-postleverantören för den API-nyckel servern använder. Nyckeln och domänen hör troligen till olika konton. Ingen fakturanummer har förbrukats.`,
+        }, { status: 400 });
+      }
+      if (match.status && match.status !== "verified") {
+        return NextResponse.json({
+          error: `Domänen ${domain} är inte verifierad (status: ${match.status}). Inget fakturanummer har förbrukats.`,
+        }, { status: 400 });
+      }
+    } catch (probeErr) {
+      /* Never let the pre-flight itself block a legitimate send: if the check cannot
+         run at all, fall through and let the real send report the real error. */
+      console.warn("[send] domain pre-flight skipped:", probeErr?.message);
+    }
+
+    /* ── Only now is a number spent ─────────────────────────────────────────── */
     let invoiceNumber = invoice.invoice_number;
+    let allocatedHere = false;
     if (!invoiceNumber || invoice.status === "draft") {
       const { data: allocated, error: numErr } = await sb.rpc("next_invoice_number", { p_series: "default" });
       if (numErr) return NextResponse.json({ error: `Kunde inte tilldela fakturanummer: ${numErr.message}` }, { status: 500 });
       invoiceNumber = allocated;
+      allocatedHere = true;
     }
+
+    /* If anything below fails, hand the number back so the series stays unbroken. */
+    const releaseNumber = async (reason) => {
+      if (!allocatedHere) return;
+      const { data: rewound, error: relErr } = await sb.rpc("release_invoice_number", {
+        p_number: invoiceNumber, p_reason: reason, p_series: "default",
+      });
+      if (relErr) console.error("[send] could not release", invoiceNumber, relErr.message);
+      else if (rewound === false) console.warn("[send] gap logged for", invoiceNumber);
+    };
 
     /* ── Freeze the breakdown so history stays reproducible ────────────────── */
     const bd = vatBreakdown(items || []);
@@ -105,30 +166,6 @@ export async function POST(req) {
     const money = new Intl.NumberFormat("sv-SE", {
       style: "currency", currency: ccy, minimumFractionDigits: 2,
     }).format(Number(invoice.total) || 0);
-
-    const resend = new Resend(process.env.RESEND_API_KEY);
-
-    /* WHO THE MAIL IS FROM.
-     * The display name must be the same legal name printed on the invoice, or the
-     * envelope and the document disagree about who is selling -- exactly the kind of
-     * mismatch that gets an invoice sent back for rattelse. sellerIdentity() is the
-     * single authority for that name; the address it returns comes from the venture,
-     * then the business default, then the environment.
-     *
-     * The address's DOMAIN MUST BE VERIFIED IN RESEND. An unverified domain is not a
-     * soft failure -- Resend rejects the send outright, so it is checked before the
-     * number is allocated rather than after.
-     */
-    const seller = sellerIdentity({ settings, venture, lang: invoice.language === "en" ? "en" : "sv" });
-    const fromName = seller.headerName || settings?.business_name || "Nordbok Studio";
-    const configured = seller.fromEmail || process.env.RESEND_FROM_EMAIL || null;
-    if (!configured) {
-      return NextResponse.json({
-        error: "Ingen avsändaradress är konfigurerad. Ange den under Inställningar → Verksamheter, och verifiera domänen i Resend.",
-      }, { status: 400 });
-    }
-    /* Accept either a bare address or an already-formatted "Name <addr>" string. */
-    const fromEmail = configured.includes("<") ? configured : `${fromName} <${configured}>`;
 
     const en = invoice.language === "en";
     const subject = en
@@ -152,15 +189,26 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
     /* `replyTo`, not `reply_to`. The Resend Node SDK went camelCase at v2 and silently
      * ignores the snake_case key -- so every customer reply was going back to the
      * sending domain instead of to a mailbox anyone reads. */
+    /* BLINDKOPIA.
+     * Mail leaves through the email provider's servers, never through your own mail
+     * client, so no copy appears in its Sent folder -- there is nothing there to
+     * appear. BCC yourself and a real copy lands in a mailbox you control, which is
+     * what most people actually mean when they go looking for "sent". */
+    const bcc = (venture?.bcc || settings?.invoice_bcc || "").trim() || null;
+
     const result = await resend.emails.send({
       from: fromEmail,
       to: client.email,
+      ...(bcc ? { bcc } : {}),
       replyTo: seller.replyTo || user.email,
       subject,
       html: body,
     });
     if (result.error) {
-      return NextResponse.json({ error: result.error.message || "Resend error" }, { status: 502 });
+      await releaseNumber(`Utskick misslyckades: ${result.error.message || "okänt fel"}`);
+      return NextResponse.json({
+        error: `${result.error.message || "Resend error"} — fakturanumret har återlämnats, serien är obruten.`,
+      }, { status: 502 });
     }
 
     /* ── Only now does it become a fact ────────────────────────────────────── */
