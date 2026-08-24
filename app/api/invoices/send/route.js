@@ -278,8 +278,17 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       }, { status: 502 });
     }
 
-    /* ── Only now does it become a fact ────────────────────────────────────── */
-    await sb.from("studio_invoices").update({
+    /* ── Only now does it become a fact ──────────────────────────────────────
+     * AND THE RESULT IS CHECKED. This update was fire-and-forget: no error, no row
+     * count. Supabase does not throw, so an RLS mismatch, a trigger rejection or a
+     * dropped connection left the customer holding invoice 2026-0007 while the row
+     * still said "Utkast" -- and because the idempotency guard above reads sent_at,
+     * pressing send again allocated a SECOND number and sent a SECOND email.
+     *
+     * That is the exact failure 009 exists to prevent, one step further down the same
+     * function. The email cannot be unsent, so a failure here is not a rollback: the
+     * number stays spent and the response has to say so plainly. */
+    const { data: recorded, error: recErr } = await sb.from("studio_invoices").update({
       invoice_number: invoiceNumber,
       status: "sent",
       sent_at: new Date().toISOString(),
@@ -289,7 +298,19 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       vat_amount: bd.vatTotal,
       total: bd.total,
       sent_from: fromEmail,
-    }).eq("id", invoice_id);
+    }).eq("id", invoice_id).select("id").maybeSingle();
+
+    if (recErr || !recorded) {
+      console.error("[send] EMAIL SENT BUT NOT RECORDED", { invoice_id, invoiceNumber, to: client.email, err: recErr?.message });
+      return NextResponse.json({
+        error:
+          `Fakturan skickades till ${client.email} som ${invoiceNumber}, men kunde inte sparas i databasen` +
+          `${recErr ? ` (${recErr.message})` : ""}. Skicka den INTE igen — numret är förbrukat och kunden har fått den. ` +
+          `Kontakta support så rättas posten manuellt.`,
+        sent_but_unrecorded: true,
+        invoice_number: invoiceNumber,
+      }, { status: 500 });
+    }
 
     /* No payment is expected on a credit note, so no chase task. Creating one would
        put "remind them to pay" on a document that says the opposite. */

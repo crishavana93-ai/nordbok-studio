@@ -49,6 +49,26 @@ const ORDER = [
 
 const BUCKET_FOR = { studio_receipts: "studio-receipts", studio_documents: "studio-documents" };
 
+/* PRIMARY KEYS, PER TABLE.
+ * The first version upserted everything with onConflict:"id". Five of these tables
+ * have no id column at all -- their keys are composite or user-scoped -- so each one
+ * errored out and was skipped. A restore would have returned invoices and receipts
+ * while dropping the seller's org number, VAT number, bankgiro AND the invoice number
+ * series, so the next invoice issued would be 2026-0001 again, colliding with ones
+ * already sent. Worse, the "is the target empty?" probe used the same select("id") and
+ * silently skipped the same five tables, so the safety check did not cover them either.
+ *
+ * Caught by an audit, not by the tool -- because the KONTROLLERA path never exercised
+ * the write path it was reporting on. */
+const PK = {
+  studio_settings:         "user_id",
+  studio_notif_prefs:      "user_id",
+  studio_invoice_series:   "user_id,series,year",
+  studio_venture_identity: "user_id,venture",
+  fx_rates:                "currency,date",
+};
+const pkOf = (t) => PK[t] || "id";
+
 const args = process.argv.slice(2);
 const valdRoot = args.find((a) => !a.startsWith("--"));
 const WRITE = args.includes("--skriv");
@@ -355,7 +375,9 @@ console.log(`\nÅterställer till ${url}\n`);
    it is a successful one, into the wrong project. */
 if (!FORCE) {
   for (const t of ORDER) {
-    const { count, error } = await sb.from(t).select("id", { count: "exact", head: true });
+    /* count over * — select("id") throws on the tables that have no id column, and a
+       probe that errors is a safety check that silently did not run. */
+    const { count, error } = await sb.from(t).select("*", { count: "exact", head: true });
     if (error) continue;
     if (count > 0) {
       die(`${t} innehåller redan ${count} rader. Återställ till ett TOMT projekt, ` +
@@ -372,7 +394,7 @@ for (const t of ORDER) {
   let done = 0;
   for (let i = 0; i < rows.length; i += 200) {
     const chunk = rows.slice(i, i + 200);
-    const { error } = await sb.from(t).upsert(chunk, { onConflict: "id" });
+    const { error } = await sb.from(t).upsert(chunk, { onConflict: pkOf(t) });
     if (error) { bad(`${t.padEnd(30)} ${error.message}`); fatal++; break; }
     done += chunk.length;
   }

@@ -17,7 +17,7 @@ const sections = [
     blurb: "Skicka professionella fakturor som följer svensk lag. Funkar lika bra för svenska kunder (med F-skatt-stämpel + moms) som för UK/US-kunder (på engelska, i USD/GBP utan moms).",
     use: [
       "Klicka 'Ny faktura'. Välj kund — om du saknar kunden klickar du '+ Ny' och fyller i på 30 sekunder.",
-      "ROT/RUT? Aktivera under 'Avancerat' — appen lägger till fastighetsbeteckning automatiskt och drar av halva arbetskostnaden.",
+      "ROT/RUT? Aktivera under 'Avancerat' — appen lägger till fastighetsbeteckning automatiskt och räknar av rätt andel — 30 % för ROT, 50 % för RUT.",
       "Skickar du till EU-företag med VAT-nummer? Reverse-charge slås på automatiskt och 'Köparen redovisar moms' skrivs ut på fakturan.",
       "Spara som utkast eller skicka direkt via e-post (din kund får ett snyggt mail med PDF-utseende och OCR-nummer).",
     ],
@@ -120,7 +120,7 @@ const glossary = [
   { term: "BAS-konto", what: "Den svenska kontoplanen som svenska bokförare använder. T.ex. 5800 = Resekostnader. Appen föreslår rätt konto för varje kvitto." },
   { term: "NE-bilaga", what: "Bilagan du fyller i när du deklarerar enskild firma. Sammanställning av intäkter och kostnader. Sista dag: 2 maj varje år." },
   { term: "OCR-nummer", what: "Det 7+1-siffriga betalningsnumret kunden anger när de betalar via Bankgiro. Appen genererar med rätt kontrollsiffra (mod-10)." },
-  { term: "ROT/RUT", what: "Skattereduktion på arbetskostnaden för bostäder (ROT = renovering, RUT = städning). Kunden får 50% rabatt, du får pengarna direkt från Skatteverket." },
+  { term: "ROT/RUT", what: "Skattereduktion på arbetskostnaden för bostäder (ROT = renovering, RUT = städning). Kunden får 30 % avdrag på ROT-arbete och 50 % på RUT, du får mellanskillnaden direkt från Skatteverket. Taket är 75 000 kr per person och år, varav högst 50 000 kr får vara ROT." },
   { term: "Reverse-charge / Omvänd skattskyldighet", what: "Vid B2B-försäljning till EU-företag med VAT-nummer redovisar köparen momsen, inte säljaren. Du fakturerar 0%." },
   { term: "OSS (One-Stop-Shop)", what: "EU:s system för B2C-försäljning till andra länder. Du måste registrera dig om du säljer för mer än 99 680 kr/år till EU-konsumenter." },
   { term: "Körjournal", what: "Skatteverkets krav på loggbok per resa: datum, från, till, syfte, km, regnr. Krav för avdrag på bilkörning." },

@@ -62,6 +62,7 @@ export default function NewInvoice() {
   const [clients, setClients] = useState([]);
   const [ventures, setVentures] = useState([]);
   const [venture, setVenture] = useState("");
+  const [rotRutUsed, setRotRutUsed] = useState(null);
   const [showNewClient, setShowNewClient] = useState(false);
 
   const today = dateISO(new Date());
@@ -120,9 +121,37 @@ export default function NewInvoice() {
     setOssCountry(country !== "SE" && EU_COUNTRIES.has(country) && !rc ? country : "");
   }, [selectedClient]);
 
+  /* What this CUSTOMER has already had granted this calendar year. The ROT/RUT
+   * ceiling is per person per year, not per invoice — deducting more than their
+   * remaining allowance means Skatteverket refuses the utbetalning and you carry
+   * the difference, because they have already paid. */
+  useEffect(() => {
+    if (!client_id) { setRotRutUsed(null); return; }
+    let live = true;
+    (async () => {
+      const year = new Date().getFullYear();
+      const { data, error } = await sb
+        .from("studio_invoices")
+        .select("rot_amount, rut_amount")
+        .eq("client_id", client_id)
+        .in("status", ["sent", "partially_paid", "paid"])
+        .gte("issue_date", `${year}-01-01`)
+        .lte("issue_date", `${year}-12-31`);
+      if (!live) return;
+      /* On a read failure say nothing rather than claim zero — a false "0 used"
+         is what produces the over-deduction this lookup exists to prevent. */
+      if (error) { setRotRutUsed(null); return; }
+      setRotRutUsed({
+        rot: (data || []).reduce((a, i) => a + (Number(i.rot_amount) || 0), 0),
+        rut: (data || []).reduce((a, i) => a + (Number(i.rut_amount) || 0), 0),
+      });
+    })();
+    return () => { live = false; };
+  }, [sb, client_id]);
+
   const computed = useMemo(
-    () => computeInvoice(items, { rot_rut_type, reverse_charge }),
-    [items, rot_rut_type, reverse_charge]
+    () => computeInvoice(items, { rot_rut_type, reverse_charge, rotRutUsedThisYear: rotRutUsed }),
+    [items, rot_rut_type, reverse_charge, rotRutUsed]
   );
 
   const updateItem = (i, patch) =>
@@ -491,6 +520,22 @@ export default function NewInvoice() {
           </dl>
         </div>
       </section>
+
+      {computed.rot_rut_capped && (
+        <p className="rounded-[var(--radius-card)] border border-warn/40 bg-warn-bg px-4 py-3 text-[13px] leading-relaxed text-ink-2">
+          <span className="font-medium text-ink">
+            {rot_rut_type}-avdraget begränsas till {money(computed.rot_rut_capped.granted, { decimals: 2 }).text}.
+          </span>{" "}
+          Arbetskostnaden ger {money(computed.rot_rut_capped.earned, { decimals: 2 }).text}, men{" "}
+          {computed.rot_rut_capped.reason === "rot_50k"
+            ? "högst 50 000 kr per person och år får vara ROT"
+            : "taket är 75 000 kr ROT och RUT sammanlagt per person och år"}
+          {computed.rot_rut_capped.knownUsage
+            ? ` och kunden har redan använt ${money((rotRutUsed?.rot || 0) + (rotRutUsed?.rut || 0), { decimals: 0 }).text} i år.`
+            : ". Vi kunde inte läsa vad kunden redan använt i år, så kontrollera det innan du skickar."}{" "}
+          Mellanskillnaden på {money(computed.rot_rut_capped.shortfall, { decimals: 2 }).text} betalar Skatteverket inte ut.
+        </p>
+      )}
 
       <Field label="Noteringar på fakturan">
         <textarea rows={3} className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />

@@ -11,7 +11,8 @@
     "arkiv": "node scripts/arkivera.mjs",
     "import-kvitton": "node scripts/importera-kvitton.mjs",
     "fx": "node scripts/backfill-fx.mjs",
-    "aterstall": "node scripts/aterstall.mjs"
+    "aterstall": "node scripts/aterstall.mjs",
+    "test": "node tests/skatt.test.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
