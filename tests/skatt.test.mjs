@@ -14,6 +14,7 @@ import { validateInvoice, vatBreakdown } from "../lib/invoice-compliance.js";
 import { ore, krona, momsOf } from "../lib/kronor.js";
 import { dayStartUTC, periodBoundsUTC, withinPeriod } from "../lib/tid.js";
 import { authorizeCron, MIN_SECRET_LENGTH } from "../lib/cron-auth.js";
+import { pathPolicy } from "../lib/path-policy.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -149,6 +150,25 @@ chk("ingen header: 401",                 authorizeCron(REQ(null), HEM).status, 4
 chk("prefix av hemligheten: 401",        authorizeCron(REQ("Bearer " + "x".repeat(42)), HEM).status, 401);
 chk("saknat ord Bearer: 401",            authorizeCron(REQ(HEM), HEM).status, 401);
 chk("trasig request kraschar inte",      authorizeCron(undefined, HEM).status, 401);
+
+
+/* ── middleware: vilka vägar får omdirigeras ────────────────────────────────
+   Middlewaren omdirigerade varje /api-anrop utan sessionskaka till /login.
+   Vercels cron har ingen sessionskaka, så jobben studsade på dörren med 307
+   och kördes aldrig. Samma omdirigering gav fetch() en HTML-sida i stället för
+   JSON — det är där \"Unexpected token <\" kom ifrån. */
+console.log("\n── middleware: /api omdirigeras aldrig ──");
+chk("cron/digest sköter sig själv",   pathPolicy("/api/cron/digest"), "self-guarded");
+chk("cron/push-due sköter sig själv", pathPolicy("/api/cron/push-due"), "self-guarded");
+chk("invoices/send sköter sig själv", pathPolicy("/api/invoices/send"), "self-guarded");
+chk("api/auth är öppen",              pathPolicy("/api/auth/callback"), "public");
+chk("/api/authz är INTE api/auth",    pathPolicy("/api/authz/secret"), "self-guarded");
+chk("startsidan är öppen",            pathPolicy("/"), "public");
+chk("/login är öppen",                pathPolicy("/login"), "public");
+chk("/loginsomething är skyddad",     pathPolicy("/loginsomething"), "protected");
+chk("/dashboard är skyddad",          pathPolicy("/dashboard"), "protected");
+chk("/settings är skyddad",           pathPolicy("/settings"), "protected");
+chk("tom väg är skyddad",             pathPolicy(""), "protected");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);
