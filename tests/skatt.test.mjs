@@ -10,6 +10,8 @@
  */
 import { computeMoms } from "../lib/moms.js";
 import { computeInvoice, ROTRUT_2026 } from "../lib/swedish-tax.js";
+import { validateInvoice, vatBreakdown } from "../lib/invoice-compliance.js";
+import { ore, krona, momsOf } from "../lib/kronor.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -56,6 +58,49 @@ chk('only 10 000 left of the rot ceiling', used.rot_amount, 10000);
 const shared=computeInvoice([line(80000,100)],{rot_rut_type:'RUT',rotRutUsedThisYear:{rot:50000,rut:20000}});
 chk('combined 75k ceiling binds rut', shared.rut_amount, 5000);
 chk('reason names the combined cap', shared.rot_rut_capped?.reason, 'combined_75k');
+
+console.log("\n── one engine: the draft and the send route must agree ──");
+/* Each of these produced a permanent 422 before the engines were merged. */
+const seller = { business_name:"Turquino Studios", address_street:"Bredåkersvägen 7", address_city:"Malmö",
+                 personnummer:"199309199090", vat_number:"SE930919909001", bankgiro:"123-4567" };
+const buyer  = { name:"Scandic Ventures", address_street:"Ystadsgatan 6", address_city:"Malmö", country_code:"SE" };
+
+function agrees(label, items, opts = {}) {
+  const drafted = computeInvoice(items, opts);
+  const sent    = vatBreakdown(items, { reverse_charge: opts.reverse_charge });
+  chk(`${label} · subtotal`, drafted.subtotal, sent.subtotal);
+  chk(`${label} · moms`,     drafted.vat_amount, sent.vatTotal);
+  const v = validateInvoice({
+    invoice: { ...drafted, invoice_number:"2026-0100", issue_date:"2026-08-24", due_date:"2026-09-23",
+               currency:"SEK", reverse_charge: opts.reverse_charge || false },
+    client: buyer, settings: seller, items,
+  });
+  const totalsErr = v.errors.filter((e) => e.includes("stämmer inte med raderna"));
+  chk(`${label} · gate lets it through`, totalsErr, []);
+}
+
+agrees("40 konsulttimmar à 1 187,50",
+  Array.from({length:40},(_,i)=>({description:`Timme ${i+1}`,quantity:1,unit_price:1187.50,vat_rate:25})));
+
+agrees("10 annonsplatser à 1 249,90 @ 6 %",
+  Array.from({length:10},(_,i)=>({description:`Annons ${i+1}`,quantity:1,unit_price:1249.90,vat_rate:6})));
+
+agrees("byggmoms, omvänd betalningsskyldighet",
+  [{description:"Byggarbete",quantity:120,unit:"tim",unit_price:750,vat_rate:25}], { reverse_charge:true });
+
+agrees("blandad moms: tidning 6 % + tillbehör 25 %",
+  [{description:"Tidning",quantity:200,unit_price:49.90,vat_rate:6},
+   {description:"Tillbehör",quantity:12,unit_price:349.50,vat_rate:25}]);
+
+console.log("\n── reverse charge really is zero, not 25 % ──");
+chk("moms = 0", computeInvoice([{description:"x",quantity:120,unit_price:750,vat_rate:25}],{reverse_charge:true}).vat_amount, 0);
+chk("total = net", computeInvoice([{description:"x",quantity:120,unit_price:750,vat_rate:25}],{reverse_charge:true}).total, 90000);
+
+console.log("\n── öre rounding (four broken copies replaced) ──");
+chk("8,54 @ 25 % = 2,14",  momsOf(8.54, 25), 2.14);
+chk("50,66 × 0,75 = 38,00", ore(50.66 * 0.75), 38);
+chk("negatives symmetric",  ore(-2.135), -2.14);
+chk("whole kronor for ruta", krona(213.74), 214);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

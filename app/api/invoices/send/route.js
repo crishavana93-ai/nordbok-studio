@@ -184,7 +184,10 @@ export async function POST(req) {
     };
 
     /* ── Freeze the breakdown so history stays reproducible ────────────────── */
-    const bd = vatBreakdown(items || []);
+    /* Same call the draft form makes, reverse charge included. Before this the route
+       recomputed WITHOUT it, so an omvänd-skattskyldighet invoice stored 0 moms and
+       validated against 25 % — a permanent 422 with no way out. */
+    const bd = vatBreakdown(items || [], { reverse_charge: invoice.reverse_charge });
     const frozen = bd.rows.map((r) => ({ rate: r.rate, net: r.net, vat: r.vat, gross: r.gross }));
 
     /* ── Momsen i kronor, för en faktura i utländsk valuta ──────────────────
