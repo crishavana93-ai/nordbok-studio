@@ -19,6 +19,7 @@ import { beraknaSkatt, grundavdrag2026, SKATT_2026 } from "../lib/skatt-2026.js"
 import { beraknaResultat } from "../lib/resultat.js";
 import { paskdagen, arBankdag, nastaBankdag } from "../lib/helgdagar.js";
 import { momsStatus, deadlineForKvartal, deadlineFor, kvartal, manad, helar, nastaPeriod } from "../lib/moms-status.js";
+import { buildTaxYearDeadlines } from "../lib/seed-deadlines.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -304,6 +305,44 @@ chk("månad: tre försenade", momsStatus({ ...BAS, periodTyp: "manad" }).forsena
 chk("utan periodtyp: ingen varning", momsStatus({ ...BAS }).saknarPeriodTyp, true);
 chk("utan periodtyp: noll perioder", momsStatus({ ...BAS }).perioder.length, 0);
 chk("okänd periodtyp fångas", momsStatus({ ...BAS, periodTyp: "vecka" }).okandPeriodTyp, "vecka");
+
+
+/* ── uppgiftslistan får inte säga något annat än bannern ───────────────────
+   Fyra kvartalsvisa momsdatum lades in oavsett redovisningsperiod. Två källor
+   som säger olika om samma deadline är värre än en enda ungefärlig. */
+console.log("\n── skattedatum härleds ur redovisningsperioden ──");
+const DAG = (t) => t.due_at.slice(0, 10);
+const moms = (rader) => rader.filter((t) => /Momsdeklaration/.test(t.title));
+
+const D_KV = buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-01-01", vat_period_type: "kvartal" });
+chk("kvartal ger fyra deklarationer", moms(D_KV).length, 4);
+chk("Q2 hamnar på 17 augusti", DAG(moms(D_KV)[1]), "2026-08-17");
+
+const D_HL = buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-04-29", vat_period_type: "helar" });
+chk("helår ger EN deklaration, inte fyra", moms(D_HL).length, 1);
+chk("helår: 12 maj 2027", DAG(moms(D_HL)[0]), "2027-05-12");
+chk("helår med EU-handel: 26 februari",
+    DAG(moms(buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-01-01", vat_period_type: "helar", vat_eu_trade: true }))[0]), "2027-02-26");
+
+const D_MN = buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-01-01", vat_period_type: "manad" });
+chk("månad ger tolv deklarationer", moms(D_MN).length, 12);
+chk("november: 17 jan är söndag, flyttas till 18", DAG(moms(D_MN)[10]), "2027-01-18");
+
+chk("okänd period: inga momsdatum alls",
+    moms(buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-04-29" })).length, 0);
+chk("okänd period: i stället en uppgift om att ta reda på den",
+    buildTaxYearDeadlines(2026, "u", { vat_registered_from: "2026-04-29" }).filter((t) => /redovisningsperiod/i.test(t.title)).length, 1);
+chk("ej momsregistrerad: inga momsdatum", moms(buildTaxYearDeadlines(2026, "u", {})).length, 0);
+
+/* Helgförskjutning och skattekontots januari/augusti-undantag. */
+chk("2 maj 2026 är lördag → 4 maj", DAG(D_KV.find((t) => /Inkomstdeklaration/.test(t.title))), "2026-05-04");
+chk("2 maj 2027 är söndag → 3 maj", DAG(buildTaxYearDeadlines(2027, "u", {}).find((t) => /Inkomstdeklaration/.test(t.title))), "2027-05-03");
+const FSK = D_KV.filter((t) => /F-skatt/.test(t.title));
+chk("F-skatt: tolv rader", FSK.length, 12);
+chk("F-skatt januari: 17:e, ej 12:e (och 17 jan 2026 är lördag)", DAG(FSK[0]), "2026-01-19");
+chk("F-skatt augusti: 17:e", DAG(FSK[7]), "2026-08-17");
+chk("F-skatt februari: 12:e", DAG(FSK[1]), "2026-02-12");
+chk("varje rad har påminnelse före förfallodag", D_KV.every((t) => t.remind_at < t.due_at), true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

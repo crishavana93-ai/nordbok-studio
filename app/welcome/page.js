@@ -132,7 +132,11 @@ export default function Welcome() {
       if (error) throw error;
 
       if (seedDeadlines) {
-        const tasks = buildTaxYearDeadlines(new Date().getFullYear(), user.id);
+        /* Inställningarna skickas med så att momsdatumen följer den faktiska
+           redovisningsperioden. Har guiden inte frågat efter den läggs i stället
+           en uppgift in om att ta reda på den — hellre det än fyra kvartalsdatum
+           som kanske inte gäller. */
+        const tasks = buildTaxYearDeadlines(new Date().getFullYear(), user.id, { ...settings, vat_number });
         /* Duplicates are harmless if the wizard is run twice; a failure here must not
            lose the settings that were just saved. */
         const { error: e2 } = await sb.from("studio_tasks").insert(tasks).select();

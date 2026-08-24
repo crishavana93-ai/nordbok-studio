@@ -90,8 +90,16 @@ export default function DeadlinesPage() {
   const seed = async () => {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return;
+    /* Momsdatumen beror på redovisningsperioden, så inställningarna måste läsas
+       innan raderna byggs. Utan dem lades fyra kvartalsdeklarationer in oavsett
+       vad Skatteverket faktiskt beslutat. */
+    const { data: settings } = await sb
+      .from("studio_settings")
+      .select("vat_registered_from, vat_dereg_from, vat_period_type, vat_eu_trade, vat_large_turnover")
+      .eq("user_id", user.id)
+      .maybeSingle();
     await withErrors(
-      () => sb.from("studio_tasks").insert(buildTaxYearDeadlines(new Date().getFullYear(), user.id)),
+      () => sb.from("studio_tasks").insert(buildTaxYearDeadlines(new Date().getFullYear(), user.id, settings)),
       "ui/deadlines-seed");
   };
 
