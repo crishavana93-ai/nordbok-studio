@@ -50,6 +50,10 @@ const TABLES = [
   "studio_invoice_series", "studio_receipts", "studio_documents", "studio_bank_tx",
   "studio_trips", "studio_business_trips", "studio_tasks", "studio_notif_prefs",
   "studio_venture_identity", "studio_assistant_log", "fx_rates",
+  /* Added after an audit found them missing. studio_memberships is who may read these
+     books; studio_invoice_number_gaps explains every hole in the invoice series. An
+     archive without the second one cannot answer "where is 2026-0001" at a kontroll. */
+  "studio_memberships", "studio_invoice_number_gaps",
 ];
 
 const BUCKETS = ["studio-receipts", "studio-documents"];
@@ -123,6 +127,11 @@ async function main() {
     projekt: url.replace(/^https?:\/\//, "").split(".")[0],
     tabeller: {},
     filer: { kontrollerade: 0, ok: 0, saknas: [], hash_avvikelse: [], utan_fil: [], foraldralosa: [] },
+    /* THE MAP. Every archived file, with the bucket and storage path it came from and
+     * the hash it had. Without this, restoring means re-implementing receiptFileName()
+     * and slug() exactly -- an archive readable only by the program that wrote it is
+     * not an archive. With it, any tool can put the files back. */
+    karta: [],
     /* Deductible rows with no verifikation behind them. This is the money at risk. */
     exponering: { poster: 0, belopp_sek: 0, moms_sek: 0 },
     allvarliga_fel: 0,
@@ -198,7 +207,52 @@ async function main() {
       const ext = path.extname(r.storage_path) || ".bin";
       const dir = path.join(root, "verifikationer", year);
       await mkdir(dir, { recursive: true });
-      await writeFile(path.join(dir, receiptFileName(r, ext)), bytes);
+      const namn = receiptFileName(r, ext);
+      await writeFile(path.join(dir, namn), bytes);
+      manifest.filer.karta.push({
+        bucket: "studio-receipts", storage_path: r.storage_path,
+        arkivfil: path.posix.join("verifikationer", year, namn),
+        sha256: hash, tabell: "studio_receipts", rad_id: r.id,
+      });
+    }
+
+    /* ── Documents ──────────────────────────────────────────────────────────
+     * studio-documents was in BUCKETS from the start but nothing ever downloaded from
+     * it: the loop above walks `receipts` only. So Arkiv -- contracts,
+     * registreringsbevis, incoming invoices, bank statements -- was described in the
+     * archive as table rows while the actual files stayed in a bucket with no backup.
+     * Found by reading the script rather than by trusting its summary line. */
+    const documents = [];
+    {
+      const { data } = await sb.from("studio_documents").select("*");
+      documents.push(...(data || []));
+    }
+    if (documents.length) console.log("\nDokument — hämtar…");
+    for (const d of documents) {
+      if (!d.storage_path) continue;
+      manifest.filer.kontrollerade++;
+      seen.add(d.storage_path);
+      const { data: blob, error } = await sb.storage.from("studio-documents").download(d.storage_path);
+      if (error || !blob) {
+        manifest.filer.saknas.push({ id: d.id, vendor: d.title, datum: d.issued_date, path: d.storage_path, fel: error?.message });
+        manifest.allvarliga_fel++;
+        console.log(`  ✗ SAKNAS  ${d.issued_date || "—"} ${d.title}`);
+        continue;
+      }
+      const bytes = Buffer.from(await blob.arrayBuffer());
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      manifest.filer.ok++;
+      const year = String(d.issued_date || d.created_at || "").slice(0, 4) || "utan-datum";
+      const ext = path.extname(d.storage_path) || ".bin";
+      const dir = path.join(root, "dokument", year);
+      await mkdir(dir, { recursive: true });
+      const namn = `${d.issued_date || "utan-datum"}_${slug(d.doc_type)}_${slug(d.title)}_${String(d.id).slice(0, 8)}${ext}`;
+      await writeFile(path.join(dir, namn), bytes);
+      manifest.filer.karta.push({
+        bucket: "studio-documents", storage_path: d.storage_path,
+        arkivfil: path.posix.join("dokument", year, namn),
+        sha256: hash, tabell: "studio_documents", rad_id: d.id,
+      });
     }
 
     /* Orphans: files in the bucket no row points at. Not fatal, but they are
@@ -213,7 +267,7 @@ async function main() {
           const { data: files } = await sb.storage.from(bucket).list(`${folder.name}/${d2.name}`, { limit: 1000 });
           for (const f of files || []) {
             const p = `${folder.name}/${d2.name}/${f.name}`;
-            if (bucket === "studio-receipts" && !seen.has(p)) manifest.filer.foraldralosa.push({ bucket, path: p });
+            if (!seen.has(p)) manifest.filer.foraldralosa.push({ bucket, path: p });
           }
         }
       }
@@ -248,7 +302,9 @@ Innehåll
 --------
   data/                  varje tabell som .json (exakt) och .csv (öppnas i Excel)
   verifikationer/<år>/   kvittobilderna, döpta datum_leverantör_belopp_hash
-  MANIFEST.json          räkning och integritetskontroll
+  dokument/<år>/         avtal, registreringsbevis, kontoutdrag m.m.
+  MANIFEST.json          räkning, integritetskontroll och filer.karta —
+                         kartan som gör att arkivet kan läsas tillbaka
 
 Kontroll av äkthet
 ------------------

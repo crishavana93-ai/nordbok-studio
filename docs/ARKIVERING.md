@@ -35,6 +35,45 @@ the answer to this problem — it solves a different one.
 Free-tier projects also pause after a period of inactivity, which is a second, separate
 way to lose access at the moment you need it (an audit, a deadline).
 
+
+## Att läsa arkivet tillbaka
+
+En säkerhetskopia är ingen säkerhetskopia förrän någon har återställt den. Fram till
+2026-08-24 hade `arkivera.mjs` skrivit arkiv i veckor utan att något program någonsin
+läst ett tillbaka — "vi har backup" var en förhoppning, inte ett faktum.
+
+```
+npm run aterstall -- ~/Nordbok-arkiv/nordbok-arkiv-2026-08-24
+```
+
+Det körs **offline**: inga nycklar, inget nätverk, inget Supabase-beroende. Det
+kontrollsummerar varje fil mot värdet som sparades när kvittot bokfördes, jämför
+radantalen mot MANIFEST, och svarar på den enda fråga som betyder något — *om projektet
+försvann i natt, skulle den här mappen kunna bygga upp det igen?* Avslutar med kod 2 om
+svaret är nej.
+
+För en riktig återställning, till ett **tomt** projekt:
+
+```
+npm run aterstall -- <arkiv> --skriv --till <url> --nyckel <service_role>
+```
+
+Den vägrar skriva in i ett projekt som redan innehåller rader, om du inte lägger till
+`--tvinga`. Den realistiska olyckan är inte en misslyckad återställning — det är en
+lyckad, in i fel projekt.
+
+### Vad kontrollen hittade när den skrevs
+
+Två luckor i själva arkiveringen, båda funna genom att läsa skriptet i stället för att
+lita på dess sammanfattningsrad:
+
+- **`studio-documents` laddades aldrig ned.** Bucketen stod med i `BUCKETS` från början,
+  men nedladdningsloopen gick bara igenom kvitton. Avtal, registreringsbevis,
+  kontoutdrag och inkommande fakturor beskrevs i arkivet som tabellrader medan filerna
+  låg kvar utan kopia.
+- **Två tabeller saknades:** `studio_memberships` och `studio_invoice_number_gaps`. Utan
+  den andra kan arkivet inte förklara varför fakturaserien har ett hål.
+
 ## What we do instead
 
 `npm run arkiv` writes a complete, self-owned archive to `~/Nordbok-arkiv/<datum>/`:
