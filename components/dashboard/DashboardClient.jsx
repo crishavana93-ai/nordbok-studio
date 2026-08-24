@@ -180,6 +180,32 @@ export default function DashboardClient({ data, ventures }) {
       </section>
 
       {/* Law 05 — the queue, with verbs. Gone entirely when there is nothing to do. */}
+      {/* TRUNCATION.
+          The hero figures are summed from the rows that came back. Past the query
+          ceiling that set is incomplete, and a total that is wrong by an unknown
+          amount must not be presented as a total. Said loudly, above the softer
+          "behöver din uppmärksamhet" list, because this one invalidates numbers the
+          user has already read further up the page. */}
+      {data.truncated?.any && (
+        <section className="rounded-[var(--radius-card)] border border-crit/40 bg-crit-bg p-4 sm:p-5">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-crit">Ofullständigt</span>
+            <h2 className="text-[13.5px] font-medium text-crit">Siffrorna ovan är inte hela året</h2>
+          </div>
+          <p className="text-[13px] leading-relaxed text-ink-2">
+            {data.truncated.invoices && data.truncated.receipts
+              ? "Både fakturorna och kvittona är fler än vad översikten hämtar."
+              : data.truncated.invoices
+              ? "Du har fler fakturor i år än vad översikten hämtar."
+              : "Du har fler kvitton i år än vad översikten hämtar."}{" "}
+            Intäkter, kostnader och momsrutorna på den här sidan räknar därför bara en
+            del av året.{" "}
+            <strong className="font-medium text-ink">Momssidan hämtar en period i taget
+            och är fullständig</strong> — använd den när du deklarerar.
+          </p>
+        </section>
+      )}
+
       {(data.flags.untagged > 0 || data.flags.untreated > 0) && (
         <section className="rounded-[var(--radius-card)] border border-warn/35 bg-warn-bg p-4">
           <div className="mb-2 flex items-center gap-2">

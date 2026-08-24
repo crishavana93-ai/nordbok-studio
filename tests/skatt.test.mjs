@@ -12,6 +12,7 @@ import { computeMoms } from "../lib/moms.js";
 import { computeInvoice, ROTRUT_2026 } from "../lib/swedish-tax.js";
 import { validateInvoice, vatBreakdown } from "../lib/invoice-compliance.js";
 import { ore, krona, momsOf } from "../lib/kronor.js";
+import { dayStartUTC, periodBoundsUTC, withinPeriod } from "../lib/tid.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -101,6 +102,30 @@ chk("8,54 @ 25 % = 2,14",  momsOf(8.54, 25), 2.14);
 chk("50,66 × 0,75 = 38,00", ore(50.66 * 0.75), 38);
 chk("negatives symmetric",  ore(-2.135), -2.14);
 chk("whole kronor for ruta", krona(213.74), 214);
+
+console.log("\n── quarter boundaries in Stockholm time ──");
+/* Every one of these payments used to fall out of BOTH quarters, or into the wrong one. */
+chk("1 Jan starts at 31 Dec 23:00Z (CET)",  dayStartUTC("2026-01-01"), "2025-12-31T23:00:00.000Z");
+chk("1 Jul starts at 30 Jun 22:00Z (CEST)", dayStartUTC("2026-07-01"), "2026-06-30T22:00:00.000Z");
+
+const Q1 = ["2026-01-01", "2026-03-31"], Q2 = ["2026-04-01", "2026-06-30"];
+chk("31 mar 14:32 Sthlm is Q1", withinPeriod("2026-03-31T12:32:00.000Z", ...Q1), true);
+chk("31 mar 14:32 Sthlm is not Q2", withinPeriod("2026-03-31T12:32:00.000Z", ...Q2), false);
+chk("31 mar 23:59 Sthlm is still Q1", withinPeriod("2026-03-31T21:59:00.000Z", ...Q1), true);
+chk("1 apr 00:30 Sthlm is Q2, not Q1", withinPeriod("2026-03-31T22:30:00.000Z", ...Q1), false);
+chk("1 apr 00:30 Sthlm is Q2", withinPeriod("2026-03-31T22:30:00.000Z", ...Q2), true);
+
+/* No gaps, no overlaps, across the whole Swedish year. */
+const QS = [Q1, Q2, ["2026-07-01","2026-09-30"], ["2026-10-01","2026-12-31"]];
+let gaps = 0, overlaps = 0;
+for (let t = new Date(dayStartUTC("2026-01-01")).getTime();
+         t < new Date(dayStartUTC("2027-01-01")).getTime(); t += 37 * 60 * 1000) {
+  const hits = QS.filter((q) => withinPeriod(new Date(t).toISOString(), ...q)).length;
+  if (hits === 0) gaps++;
+  if (hits > 1) overlaps++;
+}
+chk("no instant falls between quarters", gaps, 0);
+chk("no instant falls in two quarters", overlaps, 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);
