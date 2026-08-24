@@ -6,6 +6,7 @@
  */
 
 import DashboardClient from "@/components/dashboard/DashboardClient";
+import MomsBanner from "@/components/MomsBanner";
 import { getDashboard, VENTURES } from "@/lib/dashboard-data";
 
 export const dynamic = "force-dynamic"; // auth + live figures, never statically cached
@@ -19,6 +20,9 @@ export default async function DashboardPage() {
     // NOT <main> — layout.js already wraps every page in <main className="app-main">.
     <div>
       <h1 className="sr-only">Översikt</h1>
+      {/* Överst, före allt annat: en förfallen momsdeklaration ska inte behöva
+          letas fram. Renderar ingenting när allt är i sin ordning. */}
+      <MomsBanner />
       <DashboardClient data={data} ventures={VENTURES} />
     </div>
   );
