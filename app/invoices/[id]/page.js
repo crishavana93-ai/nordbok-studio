@@ -17,6 +17,7 @@ import { notFound } from "next/navigation";
 import { serverClient } from "@/lib/supabase-server";
 import InvoiceActions from "./actions";
 import ComplianceGate from "@/components/invoices/ComplianceGate";
+import Kreditera from "@/components/invoices/Kreditera";
 import { money, num, pct, dateISO, daysPhrase } from "@/lib/format";
 import { sellerIdentity } from "@/lib/seller";
 
@@ -64,6 +65,19 @@ export default async function InvoiceView({ params }) {
       : Promise.resolve({ data: null }),
   ]);
 
+  /* The invoice this one corrects (when it is an andringsfaktura), and the correction
+     issued against this one (when it has been credited). Both are needed on screen:
+     a document that references another is unreadable without a way to reach it. */
+  const [{ data: creditOf }, { data: creditedBy }] = await Promise.all([
+    inv.credit_of
+      ? sb.from("studio_invoices").select("id, invoice_number, issue_date, total")
+          .eq("id", inv.credit_of).maybeSingle()
+      : Promise.resolve({ data: null }),
+    sb.from("studio_invoices").select("id, invoice_number, status, sent_at")
+      .eq("credit_of", inv.id).maybeSingle(),
+  ]);
+  const isCredit = inv.document_type === "credit_note";
+
   /* One authority for the seller block, shared with the PDF and the email, so the
      three copies of this invoice can never disagree about who issued it. */
   const seller = sellerIdentity({ settings, venture, lang: inv.language === "en" ? "en" : "sv" });
@@ -86,7 +100,9 @@ export default async function InvoiceView({ params }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <span className="micro-label">
-            {inv.invoice_number ? `Faktura ${inv.invoice_number}` : "Utkast · inget nummer ännu"}
+            {inv.invoice_number
+              ? `${isCredit ? "Ändringsfaktura" : "Faktura"} ${inv.invoice_number}`
+              : `Utkast · ${isCredit ? "ändringsfaktura, " : ""}inget nummer ännu`}
           </span>
           <h1 className="mt-1 truncate text-[21px] font-medium tracking-[-0.015em]">
             {c?.name || "Ingen kund vald"}
@@ -110,8 +126,37 @@ export default async function InvoiceView({ params }) {
             Tillbaka
           </Link>
           <InvoiceActions invoice={inv} />
+          {!isDraft && !isCredit && !creditedBy && inv.status !== "cancelled" && (
+            <Kreditera invoiceNumber={inv.invoice_number} />
+          )}
         </div>
       </div>
+
+      {creditOf && (
+        <section className="rounded-[var(--radius-card)] border border-border bg-raised p-4">
+          <span className="micro-label">Ändringsfaktura</span>
+          <p className="mt-1 text-[13.5px] leading-relaxed text-ink-2">
+            Avser faktura{" "}
+            <Link href={`/invoices/${creditOf.id}`} className="font-mono text-ink underline">
+              {creditOf.invoice_number}
+            </Link>
+            {inv.credit_reason ? ` · ${inv.credit_reason}` : ""}
+          </p>
+        </section>
+      )}
+
+      {creditedBy && (
+        <section className="rounded-[var(--radius-card)] border border-warn/40 bg-warn-bg p-4">
+          <span className="micro-label">Krediterad</span>
+          <p className="mt-1 text-[13.5px] leading-relaxed text-ink-2">
+            Rättad genom ändringsfaktura{" "}
+            <Link href={`/invoices/${creditedBy.id}`} className="font-mono text-ink underline">
+              {creditedBy.invoice_number || "utkast"}
+            </Link>
+            {creditedBy.sent_at ? "." : " — som ännu inte är skickad."}
+          </p>
+        </section>
+      )}
 
       {/* ── The gate. The only route from draft to sent. ──────────────────── */}
       {isDraft && (

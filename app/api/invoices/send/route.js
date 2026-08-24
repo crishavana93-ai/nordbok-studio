@@ -25,6 +25,11 @@ import { renderInvoiceHTML } from "@/lib/invoice-html";
 import { validateInvoice, vatBreakdown } from "@/lib/invoice-compliance";
 import { sellerIdentity } from "@/lib/seller";
 
+/* The credit reason is text the user typed. It goes straight into an HTML email, so it
+ * gets escaped here rather than trusted. */
+const esc0 = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 export const runtime = "nodejs";
 
 export async function POST(req) {
@@ -56,6 +61,20 @@ export async function POST(req) {
             .eq("user_id", invoice.user_id).eq("venture", invoice.venture).maybeSingle()
         : Promise.resolve({ data: null }),
     ]);
+
+    /* An andringsfaktura is unreadable without the invoice it changes -- the law calls
+       for a sarskild och otvetydig hanvisning, and a reference the recipient cannot
+       resolve is neither. */
+    const isCredit = invoice.document_type === "credit_note";
+    const { data: creditOf } = invoice.credit_of
+      ? await sb.from("studio_invoices").select("id, invoice_number, issue_date, total")
+          .eq("id", invoice.credit_of).maybeSingle()
+      : { data: null };
+    if (isCredit && !creditOf?.invoice_number) {
+      return NextResponse.json({
+        error: "Ändringsfakturan hänvisar inte till en skickad ursprungsfaktura och kan inte skickas.",
+      }, { status: 422 });
+    }
 
     if (!client?.email) {
       return NextResponse.json({ error: "Kunden saknar e-postadress." }, { status: 400 });
@@ -159,7 +178,7 @@ export async function POST(req) {
     const frozen = bd.rows.map((r) => ({ rate: r.rate, net: r.net, vat: r.vat, gross: r.gross }));
 
     const sendable = { ...invoice, invoice_number: invoiceNumber, vat_breakdown: frozen };
-    const html = renderInvoiceHTML({ invoice: sendable, client, settings, items: items || [], venture });
+    const html = renderInvoiceHTML({ invoice: sendable, client, settings, items: items || [], venture, creditOf });
 
     /* ── Email, in the invoice's own currency ──────────────────────────────── */
     const ccy = invoice.currency || "SEK";
@@ -168,17 +187,27 @@ export async function POST(req) {
     }).format(Number(invoice.total) || 0);
 
     const en = invoice.language === "en";
-    const subject = en
-      ? `Invoice ${invoiceNumber} from ${fromName}`
-      : `Faktura ${invoiceNumber} från ${fromName}`;
+    const subject = isCredit
+      ? (en ? `Credit note ${invoiceNumber} from ${fromName} (re. invoice ${creditOf.invoice_number})`
+            : `Ändringsfaktura ${invoiceNumber} från ${fromName} (avser faktura ${creditOf.invoice_number})`)
+      : (en ? `Invoice ${invoiceNumber} from ${fromName}`
+            : `Faktura ${invoiceNumber} från ${fromName}`);
 
-    const intro = en
+    const intro = isCredit
+      ? (en
+        ? `<p>Hi ${client.contact_person || client.name},</p>
+<p>Credit note <strong>${invoiceNumber}</strong> corrects invoice <strong>${creditOf.invoice_number}</strong>. ${esc0(invoice.credit_reason || "")}</p>
+<p>Nothing is owed on this document; please disregard the original invoice.</p>`
+        : `<p>Hej ${client.contact_person || client.name},</p>
+<p>Ändringsfaktura <strong>${invoiceNumber}</strong> rättar faktura <strong>${creditOf.invoice_number}</strong>. ${esc0(invoice.credit_reason || "")}</p>
+<p>Ingen betalning ska ske på detta dokument — bortse från ursprungsfakturan.</p>`)
+      : en
       ? `<p>Hi ${client.contact_person || client.name},</p>
 <p>Please find invoice <strong>${invoiceNumber}</strong> for <strong>${money}</strong>, due <strong>${invoice.due_date}</strong>.</p>`
       : `<p>Hej ${client.contact_person || client.name},</p>
 <p>Bifogat finner du faktura <strong>${invoiceNumber}</strong> på <strong>${money}</strong>, förfaller <strong>${invoice.due_date}</strong>.</p>`;
 
-    const ref = invoice.ocr_number
+    const ref = isCredit ? "" : invoice.ocr_number
       ? `<p>${en ? "Payment reference" : "OCR-nummer för betalning"}: <strong style="font-family:ui-monospace,monospace">${invoice.ocr_number}</strong></p>`
       : "";
 
@@ -223,7 +252,9 @@ ${html.replace(/^<!doctype[^>]+>/i, "").replace(/^<html[^>]*>/i, "").replace(/<\
       sent_from: fromEmail,
     }).eq("id", invoice_id);
 
-    await sb.from("studio_tasks").insert({
+    /* No payment is expected on a credit note, so no chase task. Creating one would
+       put "remind them to pay" on a document that says the opposite. */
+    if (!isCredit) await sb.from("studio_tasks").insert({
       user_id: user.id,
       title: `Påminn ${client.name} — faktura ${invoiceNumber}`,
       description: `Faktura förföll ${invoice.due_date} och är inte markerad som betald.`,

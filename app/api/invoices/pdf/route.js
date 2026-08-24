@@ -26,7 +26,12 @@ export async function GET(req) {
           .eq("user_id", invoice.user_id).eq("venture", invoice.venture).maybeSingle()
       : { data: null };
 
-    const html = renderInvoiceHTML({ invoice, client, settings, items: items || [], venture });
+    const { data: creditOf } = invoice.credit_of
+      ? await sb.from("studio_invoices").select("id, invoice_number, issue_date, total")
+          .eq("id", invoice.credit_of).maybeSingle()
+      : { data: null };
+
+    const html = renderInvoiceHTML({ invoice, client, settings, items: items || [], venture, creditOf });
     return new NextResponse(html + `<script>setTimeout(()=>window.print(),300)</script>`, {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
