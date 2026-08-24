@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+export const runtime = "nodejs";   // node:crypto for the constant-time compare
 import { serviceClient } from "@/lib/supabase-server";
+import { authorizeCron } from "@/lib/cron-auth";
 
 /** Daily 07:00 UTC cron. For every user with push_enabled, find tasks due
  *  in the next 1 day that haven't been notified yet, and send a Web Push.
@@ -10,9 +12,11 @@ import { serviceClient } from "@/lib/supabase-server";
  *  actual signing to a small dynamic import. If `web-push` isn't installed,
  *  we no-op gracefully so the absence of the package never breaks builds.  */
 export async function GET(req) {
-  const auth = req.headers.get("authorization") || "";
-  const expected = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : null;
-  if (expected && auth !== expected) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = authorizeCron(req);
+  if (!guard.ok) {
+    if (guard.status === 503) console.error("[cron] " + guard.error);
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
+  }
 
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     return NextResponse.json({ ok: true, skipped: "VAPID keys not configured" });

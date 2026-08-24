@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+export const runtime = "nodejs";   // node:crypto for the constant-time compare
 import { serviceClient } from "@/lib/supabase-server";
+import { authorizeCron } from "@/lib/cron-auth";
 import { buildDigest } from "@/lib/digest";
 
 /** Vercel Cron entry point. Runs server-side on schedule from vercel.json.
  *  Authenticated by `Authorization: Bearer ${CRON_SECRET}` (Vercel sets this header
  *  on cron requests; our env mirrors the same value). */
 export async function GET(req) {
-  const auth = req.headers.get("authorization") || "";
-  const expected = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : null;
-  if (expected && auth !== expected) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const guard = authorizeCron(req);
+  if (!guard.ok) {
+    if (guard.status === 503) console.error("[cron] " + guard.error);
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
   return runDigest({ singleUser: null, force: false });
 }

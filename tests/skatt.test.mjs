@@ -13,6 +13,7 @@ import { computeInvoice, ROTRUT_2026 } from "../lib/swedish-tax.js";
 import { validateInvoice, vatBreakdown } from "../lib/invoice-compliance.js";
 import { ore, krona, momsOf } from "../lib/kronor.js";
 import { dayStartUTC, periodBoundsUTC, withinPeriod } from "../lib/tid.js";
+import { authorizeCron, MIN_SECRET_LENGTH } from "../lib/cron-auth.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -126,6 +127,28 @@ for (let t = new Date(dayStartUTC("2026-01-01")).getTime();
 }
 chk("no instant falls between quarters", gaps, 0);
 chk("no instant falls in two quarters", overlaps, 0);
+
+
+/* ── cron-vakten ────────────────────────────────────────────────────────────
+   Den gamla vakten lät requesten passera när CRON_SECRET saknades. Rutten kör
+   som service_role över samtliga användare, så en bortglömd miljövariabel gjorde
+   ett internt jobb till en anonym endpoint. Testet finns för att ingen ska
+   återinföra det mönstret. */
+console.log("\n── cron-vakten: felar stängt ──");
+const REQ = (h) => ({ headers: { get: (n) => (n.toLowerCase() === "authorization" ? h : null) } });
+const HEM = "x".repeat(43);
+chk("utan CRON_SECRET: nekas",           authorizeCron(REQ(`Bearer ${HEM}`), undefined).ok, false);
+chk("utan CRON_SECRET: 503, inte 401",   authorizeCron(REQ(`Bearer ${HEM}`), undefined).status, 503);
+chk("tom CRON_SECRET: nekas",            authorizeCron(REQ("Bearer "), "").ok, false);
+chk("för kort CRON_SECRET: 503",         authorizeCron(REQ("Bearer kort"), "kort").status, 503);
+chk(`${MIN_SECRET_LENGTH} tecken duger`, authorizeCron(REQ("Bearer " + "c".repeat(MIN_SECRET_LENGTH)), "c".repeat(MIN_SECRET_LENGTH)).ok, true);
+chk("ett tecken kortare nekas",          authorizeCron(REQ("Bearer " + "c".repeat(MIN_SECRET_LENGTH - 1)), "c".repeat(MIN_SECRET_LENGTH - 1)).status, 503);
+chk("rätt header släpps igenom",         authorizeCron(REQ(`Bearer ${HEM}`), HEM).ok, true);
+chk("fel header: 401",                   authorizeCron(REQ("Bearer " + "y".repeat(43)), HEM).status, 401);
+chk("ingen header: 401",                 authorizeCron(REQ(null), HEM).status, 401);
+chk("prefix av hemligheten: 401",        authorizeCron(REQ("Bearer " + "x".repeat(42)), HEM).status, 401);
+chk("saknat ord Bearer: 401",            authorizeCron(REQ(HEM), HEM).status, 401);
+chk("trasig request kraschar inte",      authorizeCron(undefined, HEM).status, 401);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);
