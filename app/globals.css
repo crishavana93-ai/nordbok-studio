@@ -15,22 +15,53 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --bg:        #fafaf7;
-  --bg-card:   #ffffff;
-  --bg-soft:   #f4f4ef;
-  --line:      #e7e7e0;
-  --text:      #18181b;
-  --text-soft: #525258;
-  --text-muted:#8a8a90;
-  --accent:    #0d3a2a;
-  --accent-soft:#e8efe9;
-  --warn:      #b45309;
-  --error:     #b91c1c;
-  --ok:        #15803d;
-  --radius:    14px;
-  --radius-sm: 8px;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
-  --shadow:    0 6px 20px rgba(15,23,42,.06);
+  /* ═══════════════════════════════════════════════════════════════════════════
+     LEGACY NAMES, ALIASED TO THE TOKEN SYSTEM.
+     Retired 2026-08-24.
+
+     These used to be a second, independent palette. Nine screens still use them —
+     Inställningar, Kunder, Bank, Körjournal, Affärsresor, Arkiv, Deadlines, Finans,
+     Hjälp — so the app was rendering two colour systems side by side, with different
+     card radii, a different type scale, and drop shadows that Direction A forbids.
+
+     Two things follow from aliasing rather than deleting:
+
+     1. Dark mode is fixed everywhere at once. The old dark block set --accent to
+        #6ee7b7, so every primary button on those nine screens was white-on-mint at
+        1.53:1 — unreadable, and GREEN, which tokens.css forbids outright because it
+        collides with --good, the colour reserved for money coming in. That block is
+        gone; the aliases follow tokens.css into dark automatically.
+
+     2. Nothing breaks while the screens are migrated one at a time. A screen still
+        writing .card gets the right colours today and the right markup later.
+
+     Do not add a new variable here. Add it to tokens.css and alias it if a legacy
+     screen needs it.
+     ═══════════════════════════════════════════════════════════════════════════ */
+  --bg:         var(--ground);
+  --bg-card:    var(--surface);
+  --bg-soft:    var(--raised);
+  --line:       var(--border);
+  --text:       var(--ink);
+  --text-soft:  var(--ink-2);
+  --text-muted: var(--ink-3);
+  --accent:     var(--brand);
+  /* The readable ink ON the accent. Was hardcoded #fff at three call sites, which is
+     wrong the moment the brand is a light bone in dark mode. */
+  --accent-ink: var(--brand-ink);
+  --accent-soft: var(--raised);
+  --error:      var(--crit);
+  --ok:         var(--good);
+  /* --warn is defined in tokens.css and wins there; not re-declared here. */
+
+  --radius:    var(--radius-card);
+  --radius-sm: var(--radius-ctl);
+
+  /* Direction A uses hairlines, not shadows. Kept as names so the old rules still
+     parse, valued at none so they stop drawing. */
+  --shadow-sm: none;
+  --shadow:    none;
+
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top:    env(safe-area-inset-top, 0px);
   --rail-w:      240px;      /* desktop sidebar width */
@@ -40,19 +71,9 @@
   --nav-h:       64px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e0f10;
-    --bg-card:#16181a;
-    --bg-soft:#1c1e20;
-    --line: #2a2c2f;
-    --text: #f5f5f0;
-    --text-soft:#c9c9c4;
-    --text-muted:#888a8f;
-    --accent: #6ee7b7;
-    --accent-soft:#0d3a2a;
-  }
-}
+/* The legacy dark palette lived here. It is gone: every name above is now an alias,
+   and tokens.css already defines the dark values for what they point at. One place
+   decides what dark mode looks like. */
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -125,7 +146,7 @@ main {
 }
 .brand-dot {
   width: 24px; height: 24px; border-radius: 7px;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   display: grid; place-items: center; font-size: 13px; font-weight: 700;
   flex: none;
 }
@@ -168,7 +189,7 @@ main {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 44px;             /* iOS HIG touch target */
   padding: 10px 18px;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   border: 0; border-radius: 10px;
   font-weight: 600; font-size: 15px;
   cursor: pointer;
@@ -270,18 +291,23 @@ main {
 }
 
 .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
-.badge-draft { background: var(--bg-soft); color: var(--text-muted); }
-.badge-sent { background: #e0f2fe; color: #075985; }
-.badge-paid { background: #dcfce7; color: var(--ok); }
-.badge-overdue { background: #fee2e2; color: var(--error); }
-.badge-review { background: #fef3c7; color: var(--warn); }
-.badge-cancelled { background: var(--bg-soft); color: var(--text-muted); text-decoration: line-through; }
-.badge-partially_paid { background: #fef3c7; color: var(--warn); }
+/* Every one of these had a hardcoded LIGHT background — so in dark mode .alert-error
+   rendered as a near-white #fef2f2 slab and .badge-sent as a bright #e0f2fe pill on a
+   #171c19 card. The token pairs already exist and already have dark values. */
+.badge-draft { background: var(--raised); color: var(--ink-3); }
+.badge-sent { background: var(--raised); color: var(--ink-2); }
+.badge-paid { background: var(--good-bg); color: var(--good); }
+.badge-overdue { background: var(--crit-bg); color: var(--crit); }
+.badge-review { background: var(--warn-bg); color: var(--warn); }
+.badge-cancelled { background: var(--raised); color: var(--ink-3); text-decoration: line-through; }
+.badge-partially_paid { background: var(--warn-bg); color: var(--warn); }
 
 .alert { padding: 12px 14px; border-radius: 10px; font-size: 14px; margin-bottom: 12px; }
-.alert-error { background: #fef2f2; color: var(--error); border: 1px solid #fecaca; }
-.alert-ok    { background: #f0fdf4; color: var(--ok);    border: 1px solid #bbf7d0; }
-.alert-info  { background: #f0f9ff; color: #075985;     border: 1px solid #bae6fd; }
+/* Borders derived from the text colour rather than a second hardcoded hex, so they
+   follow the token into dark without a parallel set of values to keep in sync. */
+.alert-error { background: var(--crit-bg); color: var(--crit); border: 1px solid color-mix(in srgb, var(--crit) 34%, transparent); }
+.alert-ok    { background: var(--good-bg); color: var(--good); border: 1px solid color-mix(in srgb, var(--good) 34%, transparent); }
+.alert-info  { background: var(--raised);  color: var(--ink-2); border: 1px solid var(--border); }
 
 .empty { text-align: center; padding: 36px 16px; color: var(--text-muted); }
 @media (min-width: 600px) { .empty { padding: 48px 24px; } }
