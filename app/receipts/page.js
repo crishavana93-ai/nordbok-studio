@@ -64,6 +64,29 @@ function Chip({ tone = "muted", children }) {
 
 export default function ReceiptsPage() {
   const sb = useMemo(() => browserClient(), []);
+
+  /* Sedan 1 juli 2024 ÄR kvittobilden verifikationen. Filen laddades upp till
+     Storage och visades sedan aldrig igen — det gick alltså inte att titta på
+     sina egna verifikationer. Hinken är privat, så länken måste signeras.
+     Den är giltig i en minut och skapas först när någon ber om den. */
+  const [oppnar, setOppnar] = useState(null);
+  const [filFel, setFilFel] = useState(null);
+
+  async function oppnaKvitto(rad) {
+    if (!rad?.storage_path) return;
+    setOppnar(rad.id); setFilFel(null);
+    try {
+      const { data, error } = await sb.storage
+        .from("studio-receipts")
+        .createSignedUrl(rad.storage_path, 60);
+      if (error || !data?.signedUrl) throw error || new Error("Ingen länk kom tillbaka.");
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setFilFel(`Kunde inte öppna filen: ${e.message || "okänt fel"}`);
+    } finally {
+      setOppnar(null);
+    }
+  }
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -173,6 +196,12 @@ export default function ReceiptsPage() {
         </section>
       )}
 
+      {filFel && (
+        <section className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg p-4">
+          <p className="text-[13px] text-ink-2">{filFel}</p>
+        </section>
+      )}
+
       {/* The ledger */}
       <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
         <h2 className="mb-3 text-[15.5px] font-medium tracking-[-0.01em]">Kvitton</h2>
@@ -231,6 +260,22 @@ export default function ReceiptsPage() {
                   {/* Law 08 — density one tap down. Law 04 — the evidence is here. */}
                   {isOpen && (
                     <dl className="mb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-[var(--radius-ctl)] bg-raised p-3.5 text-[12.5px]">
+                      <dt className="micro-label pt-0.5">Verifikation</dt>
+                      <dd className="text-ink-2">
+                        {r.storage_path ? (
+                          <button
+                            type="button"
+                            onClick={() => oppnaKvitto(r)}
+                            disabled={oppnar === r.id}
+                            className="underline underline-offset-2 hover:text-ink disabled:opacity-60"
+                          >
+                            {oppnar === r.id ? "Öppnar…" : `Visa ${r.file_mime === "application/pdf" ? "PDF" : "kvitto"}`}
+                          </button>
+                        ) : (
+                          <span className="text-crit">Ingen fil — kvittot saknar underlag</span>
+                        )}
+                      </dd>
+
                       <dt className="micro-label pt-0.5">Moms</dt>
                       <dd className="tnum font-mono text-ink-2">{money(r.vat_amount, { decimals: 2 }).text}</dd>
 

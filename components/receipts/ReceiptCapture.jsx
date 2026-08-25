@@ -103,6 +103,7 @@ async function shrink(file) {
 export default function ReceiptCapture({ onSaved }) {
   const [stage, setStage] = useState("idle");   // idle | uploading | review | saving
   const [preview, setPreview] = useState(null);
+  const [previewMime, setPreviewMime] = useState(null);
   const [zoom, setZoom] = useState(false);
   const [meta, setMeta] = useState(null);       // storage_path, file_hash, …
   const [form, setForm] = useState(empty);
@@ -111,6 +112,9 @@ export default function ReceiptCapture({ onSaved }) {
   const [fields, setFields] = useState(null);   // per-field { value, confidence, read_as }
   const [flags, setFlags] = useState([]);
   const [err, setErr] = useState(null);
+  /* "PDF sparad" är inte ett fel. Den låg i setErr och målades röd, så en
+     lyckad uppladdning såg ut som ett haveri. Egen kanal för sådant. */
+  const [info, setInfo] = useState(null);
   const [dupe, setDupe] = useState(null);
   const camRef = useRef(null);
   const fileRef = useRef(null);
@@ -131,9 +135,14 @@ export default function ReceiptCapture({ onSaved }) {
   );
 
   async function upload(raw) {
-    setErr(null); setDupe(null); setStage("uploading");
+    setErr(null); setInfo(null); setDupe(null); setStage("uploading");
     const f = await shrink(raw);
-    if (f.type.startsWith("image/")) setPreview(URL.createObjectURL(f));
+    /* Även PDF:er får en förhandsvisning. Att inte se filen man just laddat
+       upp är att inte veta om något hände. */
+    if (f.type.startsWith("image/") || f.type === "application/pdf") {
+      setPreview(URL.createObjectURL(f));
+      setPreviewMime(f.type);
+    }
 
     const fd = new FormData();
     fd.append("file", f);
@@ -182,7 +191,7 @@ export default function ReceiptCapture({ onSaved }) {
         setFields(null);
         setFlags([]);
         setForm({ ...empty });
-        if (j.note) setErr(j.note);
+        if (j.note) setInfo(j.note);
       }
       setTouched({}); setAgreed({});
       setStage("review");
@@ -237,7 +246,7 @@ export default function ReceiptCapture({ onSaved }) {
   function reset() {
     setStage("idle"); setMeta(null); setForm(empty);
     setTouched({}); setAgreed({}); setFields(null); setFlags([]);
-    setErr(null); setDupe(null); setZoom(false);
+    setErr(null); setInfo(null); setDupe(null); setZoom(false); setPreviewMime(null);
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
   }
@@ -290,6 +299,7 @@ export default function ReceiptCapture({ onSaved }) {
         )}
 
         {err && <p className="rounded-[var(--radius-ctl)] bg-crit-bg px-4 py-3 text-[13px] text-ink-2">{err}</p>}
+        {info && <p className="rounded-[var(--radius-ctl)] border border-border bg-raised px-4 py-3 text-[13px] text-ink-2">{info}</p>}
 
         <p className="text-[12.5px] leading-relaxed text-ink-3">
           Sedan 1 juli 2024 får du slänga papperskvitton när de digitaliserats — bilden blir
@@ -317,13 +327,29 @@ export default function ReceiptCapture({ onSaved }) {
             className="shrink-0 self-start overflow-hidden rounded-[var(--radius-ctl)] border border-border bg-raised"
             aria-label={zoom ? "Förminska kvittot" : "Förstora kvittot"}
           >
-            <img
-              src={preview}
-              alt="Det uppladdade kvittot"
-              className={`object-contain transition-[height,width] ${
-                zoom ? "max-h-[520px] w-full" : "h-[130px] w-[96px]"
-              }`}
-            />
+            {previewMime === "application/pdf" ? (
+              <object
+                data={preview}
+                type="application/pdf"
+                aria-label="Det uppladdade kvittot"
+                className={`block ${zoom ? "h-[520px] w-full" : "h-[130px] w-[96px]"}`}
+              >
+                {/* Vissa mobilwebbläsare vägrar rita PDF inline. Då en länk
+                    i stället för en tom ruta. */}
+                <a href={preview} target="_blank" rel="noreferrer"
+                  className="flex h-[130px] w-[96px] items-center justify-center px-2 text-center text-[11px] leading-tight text-ink-2 underline">
+                  Öppna PDF
+                </a>
+              </object>
+            ) : (
+              <img
+                src={preview}
+                alt="Det uppladdade kvittot"
+                className={`object-contain transition-[height,width] ${
+                  zoom ? "max-h-[520px] w-full" : "h-[130px] w-[96px]"
+                }`}
+              />
+            )}
           </button>
         )}
 
@@ -390,6 +416,7 @@ export default function ReceiptCapture({ onSaved }) {
       <Field label="Kategori" {...fieldProps("category")} />
 
       {err && <p className="rounded-[var(--radius-ctl)] bg-crit-bg px-4 py-3 text-[13px] text-ink-2">{err}</p>}
+      {info && <p className="rounded-[var(--radius-ctl)] border border-border bg-raised px-4 py-3 text-[13px] text-ink-2">{info}</p>}
 
       <div className="flex gap-2.5">
         <button

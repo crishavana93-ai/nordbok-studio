@@ -90,14 +90,22 @@ export async function POST(req) {
     };
 
     /* ── OCR is a suggestion layer, and it is allowed to fail ──────────────── */
-    if (!wantOcr || file.type === "application/pdf" || !process.env.ANTHROPIC_API_KEY) {
+    /* En PDF gick tidigare aldrig till tolkning: villkoret här hoppade över
+       den och svarade "Fyll i uppgifterna manuellt". Det var en gräns någon
+       skrivit in, inte en gräns i modellen — Claude läser PDF genom ett
+       document-block lika gärna som en bild. Enda kvarvarande skälet att
+       hoppa över är en fil som är för stor att skicka. */
+    const PDF_MAX = 10 * 1024 * 1024;
+    const forStorPdf = file.type === "application/pdf" && bytes.length > PDF_MAX;
+
+    if (!wantOcr || forStorPdf || !process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json({
         ...base,
         suggestions: null,
-        note: file.type === "application/pdf"
-          ? "PDF sparad. Fyll i uppgifterna manuellt."
+        note: forStorPdf
+          ? `PDF:en är ${Math.round(bytes.length / 1048576)} MB och för stor att tolka automatiskt. Den är sparad — fyll i uppgifterna för hand.`
           : !process.env.ANTHROPIC_API_KEY
-            ? "Filen är sparad. OCR är inte konfigurerad — fyll i uppgifterna manuellt."
+            ? "Filen är sparad. Automatisk tolkning är inte konfigurerad — fyll i uppgifterna för hand."
             : null,
       });
     }
@@ -164,7 +172,11 @@ async function ocr(bytes, mime) {
       messages: [{
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: mime, data: bytes.toString("base64") } },
+          /* En PDF skickas som document, en bild som image. Samma modell,
+             samma prompt, samma svar — bara olika omslag. */
+          mime === "application/pdf"
+            ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: bytes.toString("base64") } }
+            : { type: "image", source: { type: "base64", media_type: mime, data: bytes.toString("base64") } },
           {
             type: "text",
             text:
