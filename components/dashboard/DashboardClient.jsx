@@ -25,8 +25,21 @@ import Link from "next/link";
 
 import { useMemo, useState } from "react";
 import NumberFlow from "@number-flow/react";
-import MonthlyChart from "./MonthlyChart";
-import MomsSheet from "./MomsSheet";
+import dynamic from "next/dynamic";
+
+/* recharts drar med sig d3 och victory-vendor — tillsammans nära 11 MB i
+   node_modules och den enskilt största posten i förstaladdningen. Diagrammet
+   ritas ändå först efter hydrering, så det får hämtas då. Platshållaren har
+   exakt diagrammets höjd, annars hoppar sidan när det landar. */
+const MonthlyChart = dynamic(() => import("./MonthlyChart"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[210px] w-full animate-pulse rounded-[var(--radius-card)] bg-raised sm:h-[240px]" />
+  ),
+});
+
+/* Momspanelen ligger bakom vaul och syns inte förrän någon öppnar den. */
+const MomsSheet = dynamic(() => import("./MomsSheet"), { ssr: false });
 import { money, num, dateISO, daysPhrase } from "@/lib/format";
 
 const MODES = [

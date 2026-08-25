@@ -192,11 +192,15 @@ body {
 /* The canonical hero block: an 11px uppercase label over a large tabular
  * figure. Robinhood, Klarna and Revolut all ship a variant of exactly this. */
 .hero-figure {
-  font-size: clamp(44px, 13vw, 58px);
+  /* Undre gränsen är 38px, inte 44px: på en 320px-skärm tog 44px mer bredd än
+     kortet hade. overflow-wrap är det som hindrar ett stort belopp från att
+     skjuta ut ur ramen — den låg tidigare i ett @layer och nådde aldrig fram. */
+  font-size: clamp(38px, 13vw, 58px);
   font-weight: 500;
-  line-height: 0.96;
+  line-height: 0.98;
   letter-spacing: -0.032em;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .hero-unit {
   font-size: 19px;

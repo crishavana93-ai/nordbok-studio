@@ -95,15 +95,9 @@ input[type="number"] { inputmode: decimal; }
  * the 32px desktop gutter had it ever been live. */
 
 /* ── 6. Typography that survives enlargement ────────────────────────────── */
-@layer legacy {
-.hero-figure {
-  font-size: clamp(38px, 13vw, 60px);
-  line-height: 1;
-  letter-spacing: -0.035em;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;          /* a 7-figure number must wrap, not overflow */
-}
-}
+/* .hero-figure låg här, i @layer legacy, och förlorade varje gång mot den
+   olagrade regeln i tokens.css. Den är hopslagen dit i stället — en regel på ett
+   ställe. Lägg inte tillbaka en kopia här: allt i det här lagret förlorar. */
 
 /* ── 7. Motion ──────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
