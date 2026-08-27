@@ -25,7 +25,7 @@ import { reportErrorAsync } from "@/lib/report-error";
  * action in a car park and a chore you postpone.
  */
 
-import { useState, useRef, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { money } from "@/lib/format";
 
 const TREATMENTS = [
@@ -82,6 +82,12 @@ const BAND_UI = {
  * Downscale to 2000px on the long edge at q0.82 — a receipt stays perfectly legible
  * both to OCR and to a human reading it as a verifikation, and lands around 300–600 kB.
  * PDFs pass through untouched. */
+/* Samma lista som route.js godtar. Att kontrollera här också är inte
+   dubbelarbete: det ger ett begripligt besked innan filen skickas i väg. */
+const OK_MIME = new Set([
+  "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf",
+]);
+
 async function shrink(file) {
   if (!file.type.startsWith("image/") || file.size < 900_000) return file;
   try {
@@ -104,6 +110,7 @@ export default function ReceiptCapture({ onSaved }) {
   const [stage, setStage] = useState("idle");   // idle | uploading | review | saving
   const [preview, setPreview] = useState(null);
   const [previewMime, setPreviewMime] = useState(null);
+  const [drarOver, setDrarOver] = useState(false);
   const [zoom, setZoom] = useState(false);
   const [meta, setMeta] = useState(null);       // storage_path, file_hash, …
   const [form, setForm] = useState(empty);
@@ -133,6 +140,32 @@ export default function ReceiptCapture({ onSaved }) {
     () => (fields ? OCR_FIELDS.filter((k) => !resolved(k)) : []),
     [fields, touched, agreed]
   );
+
+  /* En gemensam ingång för filväljaren, släppet och inklistringen. Den enda
+     skillnaden mellan dem är hur filen kom hit. */
+  function taEmot(fil) {
+    if (!fil) return;
+    if (!OK_MIME.has(fil.type)) {
+      setErr(`${fil.name || "Filen"} är av typen ${fil.type || "okänd"}, som inte går att bokföra. Använd JPEG, PNG, HEIC eller PDF.`);
+      return;
+    }
+    upload(fil);
+  }
+
+  /* Klistra in: en skärmdump i urklipp är det snabbaste sättet att få in ett
+     kvitto som kom som bild i ett mejl. Lyssnaren sitter på fönstret och bara
+     medan skärmen väntar på en fil. */
+  useEffect(() => {
+    if (stage !== "idle") return;
+    const onPaste = (e) => {
+      const filer = [...(e.clipboardData?.files || [])];
+      if (!filer.length) return;
+      e.preventDefault();
+      taEmot(filer[0]);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [stage]);
 
   async function upload(raw) {
     setErr(null); setInfo(null); setDupe(null); setStage("uploading");
@@ -268,8 +301,20 @@ export default function ReceiptCapture({ onSaved }) {
   /* ── Capture ──────────────────────────────────────────────────────────── */
   if (stage === "idle" || stage === "uploading") {
     return (
-      <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-2 gap-2.5">
+      <div
+        className="flex flex-col gap-3"
+        onDragOver={(e) => { e.preventDefault(); if (stage === "idle") setDrarOver(true); }}
+        onDragLeave={(e) => { if (e.currentTarget === e.target) setDrarOver(false); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDrarOver(false);
+          if (stage !== "idle") return;
+          taEmot(e.dataTransfer?.files?.[0]);
+        }}
+      >
+        <div className={`grid grid-cols-2 gap-2.5 rounded-[var(--radius-card)] transition-colors ${
+          drarOver ? "outline outline-2 outline-offset-4 outline-brand" : ""
+        }`}>
           <button
             onClick={() => camRef.current?.click()}
             disabled={stage === "uploading"}
@@ -291,9 +336,17 @@ export default function ReceiptCapture({ onSaved }) {
         </div>
 
         <input ref={camRef} type="file" accept="image/*" capture="environment" hidden
-          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          onChange={(e) => taEmot(e.target.files?.[0])} />
         <input ref={fileRef} type="file" accept="image/*,application/pdf" hidden
-          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          onChange={(e) => taEmot(e.target.files?.[0])} />
+
+        {stage === "idle" && (
+          <p className="text-center text-[12.5px] leading-relaxed text-ink-3">
+            {drarOver
+              ? "Släpp filen här."
+              : "Du kan också dra hit en fil, eller klistra in en skärmdump med ⌘V."}
+          </p>
+        )}
 
         {stage === "uploading" && (
           <p className="text-center text-[13px] text-ink-3" role="status">Sparar och läser kvittot…</p>
