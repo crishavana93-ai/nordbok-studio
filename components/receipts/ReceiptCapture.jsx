@@ -170,6 +170,7 @@ export default function ReceiptCapture({ onSaved }) {
       });
 
       const s = j.suggestions;
+      if (s && j.ocr_error) setInfo(`Tolkningen är ofullständig: ${j.ocr_error}`);
       if (s) {
         setFields(s.fields || null);
         setFlags(s.flags || []);
@@ -191,7 +192,14 @@ export default function ReceiptCapture({ onSaved }) {
         setFields(null);
         setFlags([]);
         setForm({ ...empty });
-        if (j.note) setInfo(j.note);
+        if (j.ocr_error) {
+          /* Tekniskt, men det är hela poängen: utan det går det inte att veta om
+             filen var för stor, om nyckeln saknas eller om PDF:en är låst. */
+          setInfo(`Filen är sparad, men den gick inte att tolka automatiskt — fyll i uppgifterna för hand. Orsak: ${j.ocr_error}`);
+          reportErrorAsync(new Error(j.ocr_error), { scope: "ui/receipt-ocr", level: "warn" });
+        } else if (j.note) {
+          setInfo(j.note);
+        }
       }
       setTouched({}); setAgreed({});
       setStage("review");

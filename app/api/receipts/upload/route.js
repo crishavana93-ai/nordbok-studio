@@ -116,6 +116,7 @@ export async function POST(req) {
       suggestions = await ocr(bytes, file.type);
     } catch (e) {
       ocrError = e.message || String(e);
+      console.error(`[kvitto] tolkning misslyckades · ${file.type} · ${bytes.length} byte · ${ocrError}`);
     }
 
     if (suggestions) {
