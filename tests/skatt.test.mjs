@@ -20,6 +20,7 @@ import { beraknaResultat } from "../lib/resultat.js";
 import { paskdagen, arBankdag, nastaBankdag } from "../lib/helgdagar.js";
 import { momsStatus, deadlineForKvartal, deadlineFor, kvartal, manad, helar, nastaPeriod } from "../lib/moms-status.js";
 import { buildTaxYearDeadlines } from "../lib/seed-deadlines.js";
+import { matchaTransaktioner } from "../lib/avstamning.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -343,6 +344,48 @@ chk("F-skatt januari: 17:e, ej 12:e (och 17 jan 2026 är lördag)", DAG(FSK[0]),
 chk("F-skatt augusti: 17:e", DAG(FSK[7]), "2026-08-17");
 chk("F-skatt februari: 12:e", DAG(FSK[1]), "2026-02-12");
 chk("varje rad har påminnelse före förfallodag", D_KV.every((t) => t.remind_at < t.due_at), true);
+
+
+/* ── bankavstämning ────────────────────────────────────────────────────────
+   matched_receipt och matched_invoice har funnits sedan första migrationen utan
+   att någonsin sättas. Det som saknar underlag är ett hål i bokföringen, och
+   hålet syns bara när de två listorna ligger bredvid varandra. */
+console.log("\n── bankavstämning ──");
+const KV = [
+  { id: "k1", vendor: "Tre (Hi3G Access AB)", receipt_date: "2026-05-26", currency: "SEK", total: 178 },
+  { id: "k2", vendor: "Webflow, Inc.", receipt_date: "2026-05-27", currency: "USD", total: 29, total_sek: 318.5 },
+  { id: "k3", vendor: "Privatköp", receipt_date: "2026-05-26", currency: "SEK", total: 178, is_business: false },
+];
+const FK = [
+  { id: "f1", invoice_number: "2026-0004", client_name: "ScandiVentures AB", status: "paid", paid_at: "2026-06-01", currency: "SEK", total: 6250 },
+  { id: "f2", invoice_number: "2026-0009", client_name: "Utkast AB", status: "draft", currency: "SEK", total: 6250 },
+];
+const TX = [
+  { id: "t1", tx_date: "2026-05-26", description: "KORTKOP TRE SVERIGE", amount: -178, currency: "SEK" },
+  { id: "t2", tx_date: "2026-05-28", description: "WEBFLOW INC", amount: -318.5, currency: "SEK" },
+  { id: "t3", tx_date: "2026-06-01", description: "INBETALNING SCANDIVENTURES", amount: 6250, currency: "SEK" },
+  { id: "t4", tx_date: "2026-06-04", description: "SWISH TILL OKAND", amount: -2400, currency: "SEK" },
+];
+const AV = matchaTransaktioner({ transaktioner: TX, kvitton: KV, fakturor: FK });
+const rad = (id) => AV.rader.find((r) => r.tx.id === id);
+chk("utgift matchar rätt kvitto", rad("t1").forslag[0].id, "k1");
+chk("och räknas som säker", rad("t1").forslag[0].sakerhet, "säker");
+chk("privatköp föreslås aldrig", rad("t1").forslag.some((x) => x.id === "k3"), false);
+chk("utländskt kvitto matchas via SEK-beloppet", rad("t2").forslag[0].id, "k2");
+chk("inbetalning matchar faktura", rad("t3").forslag[0].id, "f1");
+chk("utkast föreslås aldrig", AV.rader.every((r) => !r.forslag.some((x) => x.id === "f2")), true);
+chk("utgift matchas aldrig mot faktura", rad("t1").forslag.every((x) => x.typ === "kvitto"), true);
+chk("transaktion utan underlag hittas", rad("t4").forslag.length, 0);
+chk("och säger varför", rad("t4").varfor, "inget kvitto med det beloppet");
+chk("beloppet utan underlag summeras", AV.beloppUtanUnderlag, 2400);
+
+/* Beloppet är ankaret: rätt namn och rätt datum räcker inte. */
+chk("fel belopp ger ingen match trots rätt namn och datum",
+    matchaTransaktioner({ transaktioner: [{ id: "x", tx_date: "2026-05-26", description: "TRE SVERIGE", amount: -9999, currency: "SEK" }], kvitton: KV, fakturor: FK }).rader[0].forslag.length, 0);
+chk("ett kvitto kan inte kopplas till två transaktioner",
+    matchaTransaktioner({ transaktioner: [{ id: "a", tx_date: "2026-05-26", description: "TRE", amount: -178, currency: "SEK", matched_receipt: "k1" }, { id: "b", tx_date: "2026-05-26", description: "TRE IGEN", amount: -178, currency: "SEK" }], kvitton: KV, fakturor: FK }).rader[0].forslag.length, 0);
+chk("annan valuta på transaktionen gissas inte",
+    matchaTransaktioner({ transaktioner: [{ id: "e", tx_date: "2026-05-26", description: "EURO", amount: -100, currency: "EUR" }], kvitton: KV, fakturor: FK }).rader[0].varfor, "transaktionen är i annan valuta än kronor");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);
