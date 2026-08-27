@@ -165,6 +165,17 @@ export default async function InvoiceView({ params }) {
 
       {/* ── The gate. The only route from draft to sent. ──────────────────── */}
       {isDraft && (
+        <div className="mb-3">
+          <Link
+            href={`/invoices/new?edit=${inv.id}`}
+            className="inline-block rounded-[var(--radius-ctl)] border border-border-firm px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised"
+          >
+            Ändra utkastet
+          </Link>
+        </div>
+      )}
+
+      {isDraft && (
         <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">
           <h2 className="mb-1 text-[15.5px] font-medium tracking-[-0.01em]">Skicka fakturan</h2>
           <p className="mb-3.5 text-[12.5px] leading-relaxed text-ink-3">
