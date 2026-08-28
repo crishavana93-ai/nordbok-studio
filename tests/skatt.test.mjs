@@ -22,6 +22,7 @@ import { momsStatus, deadlineForKvartal, deadlineFor, kvartal, manad, helar, nas
 import { buildTaxYearDeadlines } from "../lib/seed-deadlines.js";
 import { matchaTransaktioner } from "../lib/avstamning.js";
 import { byggFlode } from "../lib/handelser.js";
+import { bedomAvdrag, REPRESENTATION } from "../lib/avdrag.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -422,6 +423,46 @@ chk("en obetald faktura", FL.obetalda, 1);
 chk("tomt underlag ger inga grupper", byggFlode({ idag: "2026-06-10" }).grupper.length, 0);
 chk("taket respekteras",
     byggFlode({ kvitton: Array.from({ length: 50 }, (_, i) => ({ vendor: "K" + i, receipt_date: "2026-06-01", currency: "SEK", total: 1 })), idag: "2026-06-10", max: 10 }).grupper[0].poster.length, 10);
+
+
+/* ── avdragsbedömningen ────────────────────────────────────────────────────
+   Det dyraste felet ett kvitto kan bära är tyst: en utländsk leverantör som
+   saknar ditt momsnummer debiterar sin egen moms, och den går inte att få
+   tillbaka i Sverige. Kvittot ser komplett ut hela tiden. */
+console.log("\n── avdrag ──");
+const MOMSNR = "SE930919909001";
+const utan = bedomAvdrag({ vendor: "Anthropic, PBC", vendor_country: "US", total: 242, vat_amount: 42 }, { egetMomsnummer: MOMSNR });
+chk("utländsk moms utan momsnummer: ej avdragsgill", utan.moms_avdrag, 0);
+chk("hela beloppet blir kostnad", utan.kostnad_avdrag, 242);
+chk("varnas med hög allvarlighet", utan.varningar[0].allvar, "hog");
+chk("beloppet på spel namnges", utan.pa_spel, 42);
+chk("åtgärden nämner det egna momsnumret", /SE930919909001/.test(utan.varningar[0].atgard), true);
+
+const med = bedomAvdrag({ vendor: "Anthropic, PBC", vendor_country: "US", total: 200, vat_amount: 0, buyer_vat_number: MOMSNR }, { egetMomsnummer: MOMSNR });
+chk("med momsnummer: omvänd skattskyldighet", med.behandling, "rc_non_eu");
+chk("och inga varningar", med.varningar.length, 0);
+chk("EU utan moms blir rc_eu", bedomAvdrag({ vendor_country: "NL", total: 125, vat_amount: 0 }).behandling, "rc_eu");
+
+const sv = bedomAvdrag({ vendor: "Tre", vendor_country: "SE", total: 178, vat_amount: 35.6 });
+chk("svensk moms är avdragsgill", sv.moms_avdrag, 35.6);
+chk("kostnaden är nettot", sv.kostnad_avdrag, 142.4);
+chk("halv privat andel halverar momsen",
+    bedomAvdrag({ vendor_country: "SE", total: 178, vat_amount: 35.6, business_share: 0.5 }).moms_avdrag, 17.8);
+chk("böter är aldrig avdragsgilla",
+    bedomAvdrag({ vendor_country: "SE", total: 800, description: "Parkeringsanmärkning" }).avdragsgill, "nej");
+chk("ej momsregistrerad drar ingen moms",
+    bedomAvdrag({ vendor_country: "SE", total: 178, vat_amount: 35.6 }, { momsregistrerad: false }).moms_avdrag, 0);
+
+/* Representation: antalet personer går inte att läsa ur ett kvitto, så
+   siffran räknas inte fram — den efterfrågas. */
+const rep = bedomAvdrag({ vendor: "Restaurang", vendor_country: "SE", total: 1200, vat_amount: 72, category: "Restaurang" });
+chk("representation: momsavdraget lämnas okänt", rep.moms_avdrag, null);
+chk("och kostnaden med det", rep.kostnad_avdrag, null);
+chk("livsmedelsmoms 6 % ger 18 kr per person", REPRESENTATION.MOMS_MAT_PER_PERSON, 18);
+chk("schablon med alkohol 33 kr", REPRESENTATION.SCHABLON_MED_ALKOHOL, 33);
+chk("leasad personbil: halv moms",
+    bedomAvdrag({ vendor_country: "SE", total: 5000, vat_amount: 1000, category: "Leasing" }).moms_avdrag, 500);
+chk("tomt kvitto kraschar inte", typeof bedomAvdrag({}).avdragsgill, "string");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

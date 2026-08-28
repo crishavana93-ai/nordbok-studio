@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { requireUser } from "@/lib/supabase-server";
 import { suggestBasAccount } from "@/lib/swedish-tax";
+import { bedomAvdrag } from "@/lib/avdrag";
 
 export const runtime = "nodejs";          // needs node:crypto
 export const maxDuration = 60;            // OCR on a large photo isn't instant
@@ -119,17 +120,33 @@ export async function POST(req) {
       console.error(`[kvitto] tolkning misslyckades · ${file.type} · ${bytes.length} byte · ${ocrError}`);
     }
 
+    let avdrag = null;
     if (suggestions) {
       const bas = suggestBasAccount(suggestions.vendor || "", suggestions.description || "");
       suggestions.bas_account = bas.account;
       suggestions.ne_row = bas.ne;
       suggestions.category = suggestions.category || bas.label;
       suggestions.vat_treatment = guessTreatment(suggestions);
+
+      /* Fälten är inte frågan. Frågan är vad som får dras av — och om en
+         utländsk leverantör debiterat sin egen moms för att den inte vet att
+         köparen är ett momsregistrerat företag. Den momsen är förlorad, och
+         syns inte som ett fel någonstans annars. */
+      const { data: inst } = await sb
+        .from("studio_settings")
+        .select("vat_number, vat_registered_from")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      avdrag = bedomAvdrag(suggestions, {
+        egetMomsnummer: inst?.vat_number || null,
+        momsregistrerad: !!inst?.vat_registered_from,
+      });
     }
 
     return NextResponse.json({
       ...base,
       suggestions,          // null when OCR failed — the form still works
+      avdrag,               // bedömningen: vad som får dras av, och varför
       ocr_error: ocrError,  // shown quietly; never blocks the user
     });
   } catch (e) {
@@ -196,12 +213,16 @@ text på kvittot du läste värdet från.
     "vat_rate":       { "value": <25 | 12 | 6 | 0>, "confidence": 0.0-1.0, "read_as": "<t.ex. 'MOMS 25%'>" },
     "currency":       { "value": "<SEK | EUR | USD | ...>", "confidence": 0.0-1.0, "read_as": "<valutatecken eller kod>" },
     "category":       { "value": "<kort svensk kategori>", "confidence": 0.0-1.0, "read_as": "<varuraderna>" },
-    "description":    { "value": "<vad som köptes, kort>", "confidence": 0.0-1.0, "read_as": "<varuraderna>" }
+    "description":    { "value": "<vad som köptes, kort>", "confidence": 0.0-1.0, "read_as": "<varuraderna>" },
+    "buyer_vat_number": { "value": "<KÖPARENS momsnummer om det står på kvittot, annars null>", "confidence": 0.0-1.0, "read_as": "<raden du läste det från>" }
   },
   "flags": ["<kort varning på svenska, en per problem — tom lista om inget>"]
 }
 
 REGLER
+- buyer_vat_number är KÖPARENS nummer, inte säljarens. Ett svenskt ser ut som
+  SE följt av 12 siffror. Står bara säljarens nummer på kvittot: sätt null.
+  Skillnaden avgör om utländsk moms debiterats i onödan, så gissa inte.
 - Kan du inte läsa ett fält säkert: sätt "value" till null och "confidence" till din
   faktiska säkerhet. Gissa aldrig ett belopp för att fylla ett fält.
 - Läs momsbeloppet exakt som det står. Räkna INTE ut det själv. Står det ingen moms,

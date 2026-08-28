@@ -118,6 +118,7 @@ export default function ReceiptCapture({ onSaved }) {
   const [agreed, setAgreed] = useState({});     // fields the human explicitly confirmed
   const [fields, setFields] = useState(null);   // per-field { value, confidence, read_as }
   const [flags, setFlags] = useState([]);
+  const [avdrag, setAvdrag] = useState(null);
   const [err, setErr] = useState(null);
   /* "PDF sparad" är inte ett fel. Den låg i setErr och målades röd, så en
      lyckad uppladdning såg ut som ett haveri. Egen kanal för sådant. */
@@ -207,6 +208,7 @@ export default function ReceiptCapture({ onSaved }) {
       if (s) {
         setFields(s.fields || null);
         setFlags(s.flags || []);
+        setAvdrag(j.avdrag || null);
         setForm({
           ...empty,
           vendor: s.vendor || "",
@@ -224,6 +226,7 @@ export default function ReceiptCapture({ onSaved }) {
       } else {
         setFields(null);
         setFlags([]);
+        setAvdrag(null);
         setForm({ ...empty });
         if (j.ocr_error) {
           /* Tekniskt, men det är hela poängen: utan det går det inte att veta om
@@ -435,6 +438,54 @@ export default function ReceiptCapture({ onSaved }) {
           </p>
         </div>
       </div>
+
+      {/* Vad som får dras av. Fälten ovan är avläsning; det här är bedömningen. */}
+      {avdrag && (
+        <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-[13.5px] font-medium text-ink">Avdrag</h3>
+            <span className={`rounded px-2 py-0.5 font-mono text-[10.5px] font-medium ${
+              avdrag.avdragsgill === "ja" ? "bg-good-bg text-good"
+              : avdrag.avdragsgill === "nej" ? "bg-crit-bg text-crit"
+              : "bg-warn-bg text-warn"
+            }`}>
+              {avdrag.avdragsgill === "ja" ? "avdragsgill"
+                : avdrag.avdragsgill === "nej" ? "ej avdragsgill" : "delvis avdragsgill"}
+            </span>
+          </div>
+
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[12.5px]">
+            <dt className="micro-label pt-0.5">Kostnad</dt>
+            <dd className="tnum font-mono text-ink-2">
+              {avdrag.kostnad_avdrag == null ? "beror på antal personer" : `${avdrag.kostnad_avdrag} kr`}
+            </dd>
+            <dt className="micro-label pt-0.5">Moms att dra</dt>
+            <dd className="tnum font-mono text-ink-2">
+              {avdrag.moms_avdrag == null ? "beror på antal personer" : `${avdrag.moms_avdrag} kr`}
+            </dd>
+          </dl>
+
+          {avdrag.skal.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-1.5 text-[12.5px] leading-relaxed text-ink-2">
+              {avdrag.skal.map((r, i) => <li key={i}>· {r}</li>)}
+            </ul>
+          )}
+
+          {avdrag.varningar.map((v, i) => (
+            <div
+              key={i}
+              className={`mt-3 rounded-[var(--radius-ctl)] border p-3 ${
+                v.allvar === "hog" ? "border-crit/35 bg-crit-bg" : "border-warn/35 bg-warn-bg"
+              }`}
+            >
+              <p className="text-[13px] font-medium leading-relaxed text-ink">{v.text}</p>
+              {v.atgard && (
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-2">{v.atgard}</p>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Law 05 — Granska. The model's own honest caveats, verbatim. */}
       {flags.length > 0 && (
