@@ -24,7 +24,10 @@ for (const line of readFileSync(new URL("../.env.local", import.meta.url), "utf8
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
 }
 
-const WRITE = process.argv.includes("--write");
+/* Tar både --skriv och --write. Alla andra skript i projektet skriver bara med
+   --skriv, och att just det här kräver engelska betyder att den som skriver
+   --skriv får en torrkörning som ser ut som en riktig körning. */
+const WRITE = process.argv.includes("--write") || process.argv.includes("--skriv");
 const LOOKBACK = 10; // ECB publishes on TARGET business days only
 const ECB = "https://data-api.ecb.europa.eu/service/data/EXR";
 

@@ -207,6 +207,21 @@ export function buildSie({ settings, invoices, receipts, year, programVersion = 
     const costAcc = String(rc.bas_account || (deductible ? "6991" : "6992"));
     const trans = [];
 
+    /* Omvänd betalningsskyldighet betyder att leverantören INTE debiterat moms.
+       Står det ändå ett momsbelopp på raden motsäger de två varandra, och den
+       gamla koden bokförde motsägelsen rakt av: verifikatet gick inte ihop med
+       exakt momsbeloppet, och hela filen vägrade skrivas med ett "diff" som inte
+       sa vad som var fel. Nu namnges raden i stället. */
+    if ((rc.vat_treatment === "rc_eu" || rc.vat_treatment === "rc_non_eu") && vat > 0) {
+      excluded.push({
+        kind: "Kvitto", label: rcLabel, allvarlig: true,
+        reason: `markerad som omvänd betalningsskyldighet men har ${vat.toFixed(2).replace(".", ",")} kr moms — ` +
+          `de kan inte båda stämma. Debiterade leverantören moms är behandlingen ` +
+          `"oss_non_ded" (utländsk moms, ej avdragsgill). Gjorde den inte det ska momsbeloppet vara 0.`,
+      });
+      continue;
+    }
+
     switch (rc.vat_treatment) {
       case "rc_eu":
       case "rc_non_eu": {

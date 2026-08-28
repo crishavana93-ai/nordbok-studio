@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { browserClient } from "@/lib/supabase";
 import ReceiptCapture from "@/components/receipts/ReceiptCapture";
+import KvittoRattelse from "@/components/receipts/KvittoRattelse";
 import { money, num, dateISO, dateProse } from "@/lib/format";
 import { readActiveOwnerId } from "@/lib/owner-client";
 
@@ -91,6 +92,9 @@ export default function ReceiptsPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  /* Vilket kvitto som rättas just nu. Ett i taget — två öppna formulär mot samma
+     tabell är ett sätt att skriva över sin egen ändring utan att märka det. */
+  const [rattar, setRattar] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
   async function load() {
@@ -227,7 +231,7 @@ export default function ReceiptsPage() {
               return (
                 <div key={r.id} className="border-b border-border last:border-b-0">
                   <button
-                    onClick={() => setExpanded(isOpen ? null : r.id)}
+                    onClick={() => { setExpanded(isOpen ? null : r.id); setRattar(null); }}
                     aria-expanded={isOpen}
                     className="grid w-full grid-cols-[1fr_auto] items-start gap-3 py-3 text-left"
                   >
@@ -256,6 +260,14 @@ export default function ReceiptsPage() {
                       )}
                     </span>
                   </button>
+
+                  {isOpen && rattar === r.id && (
+                    <KvittoRattelse
+                      kvitto={r}
+                      onAvbryt={() => setRattar(null)}
+                      onSparad={() => { setRattar(null); load(); }}
+                    />
+                  )}
 
                   {/* Law 08 — density one tap down. Law 04 — the evidence is here. */}
                   {isOpen && (
@@ -293,7 +305,7 @@ export default function ReceiptsPage() {
                         <dd className="text-ink-2">{r.description}</dd>
                       </>)}
 
-                      <dt className="micro-label pt-0.5">Verifikation</dt>
+                      <dt className="micro-label pt-0.5">Kontrollsumma</dt>
                       <dd className="break-all font-mono text-[11px] text-ink-3">
                         {r.file_hash ? `sha256 ${r.file_hash.slice(0, 16)}…` : "ingen fil sparad"}
                       </dd>
@@ -302,6 +314,17 @@ export default function ReceiptsPage() {
                         <dt className="micro-label pt-0.5">Sparad</dt>
                         <dd className="text-ink-2">{dateProse(r.uploaded_at)}</dd>
                       </>)}
+
+                      <dt className="micro-label pt-0.5">Rätta</dt>
+                      <dd>
+                        <button
+                          type="button"
+                          onClick={() => setRattar(rattar === r.id ? null : r.id)}
+                          className="underline underline-offset-2 text-ink-2 hover:text-ink"
+                        >
+                          {rattar === r.id ? "Stäng formuläret" : "Ändra uppgifterna"}
+                        </button>
+                      </dd>
                     </dl>
                   )}
                 </div>
