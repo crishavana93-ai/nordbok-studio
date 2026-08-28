@@ -15,7 +15,8 @@
     "test": "node tests/skatt.test.mjs",
     "sie": "node scripts/sie.mjs",
     "kontera": "node scripts/kontera.mjs",
-    "momsstatus": "node scripts/momsstatus.mjs"
+    "momsstatus": "node scripts/momsstatus.mjs",
+    "arkivplan": "node scripts/arkivplan.mjs"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",

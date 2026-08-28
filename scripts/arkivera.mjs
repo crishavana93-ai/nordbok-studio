@@ -54,6 +54,11 @@ const TABLES = [
      books; studio_invoice_number_gaps explains every hole in the invoice series. An
      archive without the second one cannot answer "where is 2026-0001" at a kontroll. */
   "studio_memberships", "studio_invoice_number_gaps",
+  /* Tillagd 2026-08-24. studio_moms_perioder är beviset på vilka
+     momsdeklarationer som faktiskt lämnats. Utan den kan ett återställt arkiv
+     inte svara på om en period är redovisad — och frånvaron av en rad är hela
+     tabellens innebörd. */
+  "studio_moms_perioder",
 ];
 
 const BUCKETS = ["studio-receipts", "studio-documents"];
