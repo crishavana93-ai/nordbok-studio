@@ -21,6 +21,7 @@ import { paskdagen, arBankdag, nastaBankdag } from "../lib/helgdagar.js";
 import { momsStatus, deadlineForKvartal, deadlineFor, kvartal, manad, helar, nastaPeriod } from "../lib/moms-status.js";
 import { buildTaxYearDeadlines } from "../lib/seed-deadlines.js";
 import { matchaTransaktioner } from "../lib/avstamning.js";
+import { byggFlode } from "../lib/handelser.js";
 let pass=0, fail=0;
 const chk=(n,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'  PASS':'  FAIL',n,ok?'':`\n      got ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`);ok?pass++:fail++;};
 
@@ -386,6 +387,41 @@ chk("ett kvitto kan inte kopplas till två transaktioner",
     matchaTransaktioner({ transaktioner: [{ id: "a", tx_date: "2026-05-26", description: "TRE", amount: -178, currency: "SEK", matched_receipt: "k1" }, { id: "b", tx_date: "2026-05-26", description: "TRE IGEN", amount: -178, currency: "SEK" }], kvitton: KV, fakturor: FK }).rader[0].forslag.length, 0);
 chk("annan valuta på transaktionen gissas inte",
     matchaTransaktioner({ transaktioner: [{ id: "e", tx_date: "2026-05-26", description: "EURO", amount: -100, currency: "EUR" }], kvitton: KV, fakturor: FK }).rader[0].varfor, "transaktionen är i annan valuta än kronor");
+
+
+/* ── händelseflödet ────────────────────────────────────────────────────────
+   Hemskärmen svarade på hur det står till men aldrig på vad som hänt. Flödet
+   grupperas per månad, för bokföring räknas i perioder — en ström som rinner
+   förbi periodgränserna döljer det enda som ska summeras. */
+console.log("\n── händelseflöde ──");
+const FL = byggFlode({
+  fakturor: [
+    { id: "a", invoice_number: "2026-0004", status: "paid", issue_date: "2026-05-20", paid_at: "2026-06-01", currency: "SEK", total: 6250, client_name: "ScandiVentures" },
+    { id: "b", invoice_number: "2026-0005", status: "sent", issue_date: "2026-06-02", due_date: "2026-07-02", currency: "USD", total: 1000, total_sek: 10500, client_name: "Pierce Youngbar" },
+  ],
+  kvitton: [
+    { vendor: "Tre", receipt_date: "2026-06-01", currency: "SEK", total: 178, category: "Telefoni" },
+    { vendor: "Privat", receipt_date: "2026-05-30", currency: "SEK", total: 99, is_business: false },
+  ],
+  resor: [{ trip_date: "2026-06-04", purpose: "Kundmöte", deduction: 75 }],
+  momsPerioder: [{ period_key: "2026-Q1", lamnad_at: "2026-05-12T09:00:00Z", belopp: -430 }],
+  idag: "2026-06-10",
+});
+chk("grupperas per månad", FL.grupper.map((g) => g.etikett), ["juni 2026", "maj 2026"]);
+chk("betalning före kvitto samma dag", FL.grupper[0].poster.filter((p) => p.datum === "2026-06-01")[0].typ, "betalning");
+chk("utländsk faktura visas i kronor", FL.grupper[0].poster.find((p) => /0005/.test(p.rubrik)).belopp, 10500);
+chk("obetald faktura markeras", FL.grupper[0].poster.find((p) => /0005/.test(p.rubrik)).obetald, true);
+chk("privat kvitto flaggas", FL.grupper[1].poster.find((p) => p.rubrik === "Privat").privat, true);
+chk("månadens in", FL.grupper[0].in, 6250);
+chk("månadens ut", FL.grupper[0].ut, 178);
+chk("resa räknas varken in eller ut", FL.grupper[0].poster.find((p) => p.typ === "resa").riktning, "avdrag");
+/* En momsåterbetalning har negativt belopp men är pengar IN. Räknas tecknet med
+   blir månadens inkommande negativt, vilket ingen läser rätt. */
+chk("återbetalning räknas som positivt inflöde", FL.grupper[1].in, 430);
+chk("en obetald faktura", FL.obetalda, 1);
+chk("tomt underlag ger inga grupper", byggFlode({ idag: "2026-06-10" }).grupper.length, 0);
+chk("taket respekteras",
+    byggFlode({ kvitton: Array.from({ length: 50 }, (_, i) => ({ vendor: "K" + i, receipt_date: "2026-06-01", currency: "SEK", total: 1 })), idag: "2026-06-10", max: 10 }).grupper[0].poster.length, 10);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

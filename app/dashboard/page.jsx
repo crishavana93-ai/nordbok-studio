@@ -7,6 +7,7 @@
 
 import DashboardClient from "@/components/dashboard/DashboardClient";
 import MomsBanner from "@/components/MomsBanner";
+import Handelseflode from "@/components/Handelseflode";
 import { getDashboard, VENTURES } from "@/lib/dashboard-data";
 
 export const dynamic = "force-dynamic"; // auth + live figures, never statically cached
@@ -24,6 +25,11 @@ export default async function DashboardPage() {
           letas fram. Renderar ingenting när allt är i sin ordning. */}
       <MomsBanner />
       <DashboardClient data={data} ventures={VENTURES} />
+
+      {/* Nyckeltalen svarar på hur det står till. Flödet svarar på vad som hänt. */}
+      <div className="mx-auto mt-3 w-full max-w-[1080px]">
+        <Handelseflode />
+      </div>
     </div>
   );
 }
