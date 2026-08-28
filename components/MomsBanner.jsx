@@ -72,6 +72,9 @@ export default async function MomsBanner() {
         deklarationen visar noll eller ett belopp att få tillbaka
         {flera ? `, sammanlagt ${avgift} kr` : ""}.
         <Knapp href={`/moms?period=${s.forsenade[0].key}`}>Se perioden</Knapp>
+        <span style={{ flexBasis: "100%", fontSize: 12, color: "var(--ink-3)" }}>
+          Meddelandet försvinner när deklarationen är lämnad och registrerad.
+        </span>
       </Remsa>
     );
   }
@@ -113,8 +116,19 @@ function Remsa({ ton, children }) {
         lineHeight: 1.5,
       }}
     >
-      <span aria-hidden="true" style={{ color: "var(--warn)", fontWeight: 600 }}>
-        {varning ? "✗" : "?"}
+      <span
+        aria-hidden="true"
+        style={{
+          flex: "0 0 auto",
+          width: 20, height: 20,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          borderRadius: 999,
+          border: "1px solid var(--warn)",
+          color: "var(--warn)",
+          fontWeight: 700, fontSize: 13, lineHeight: 1,
+        }}
+      >
+        {varning ? "!" : "?"}
       </span>
       <span style={{ flex: "1 1 320px", minWidth: 0 }}>{children}</span>
     </div>
