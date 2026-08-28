@@ -131,12 +131,19 @@ async function main() {
     skapad: new Date().toISOString(),
     projekt: url.replace(/^https?:\/\//, "").split(".")[0],
     tabeller: {},
-    filer: { kontrollerade: 0, ok: 0, saknas: [], hash_avvikelse: [], utan_fil: [], foraldralosa: [] },
-    /* THE MAP. Every archived file, with the bucket and storage path it came from and
-     * the hash it had. Without this, restoring means re-implementing receiptFileName()
-     * and slug() exactly -- an archive readable only by the program that wrote it is
-     * not an archive. With it, any tool can put the files back. */
-    karta: [],
+    filer: {
+      kontrollerade: 0, ok: 0, saknas: [], hash_avvikelse: [], utan_fil: [], foraldralosa: [],
+      /* THE MAP. Every archived file, with the bucket and storage path it came from and
+       * the hash it had. Without this, restoring means re-implementing receiptFileName()
+       * and slug() exactly -- an archive readable only by the program that wrote it is
+       * not an archive. With it, any tool can put the files back.
+       *
+       * Låg utanför `filer` fram till 2026-08-28. Kommentaren ovan sköt nyckeln ur
+       * objektet den hörde till, så skrivningen på rad 228 träffade undefined och
+       * arkiveringen kraschade på första filen — varje gång, sedan den skrevs.
+       * aterstall.mjs har hela tiden läst filer.karta. */
+      karta: [],
+    },
     /* Deductible rows with no verifikation behind them. This is the money at risk. */
     exponering: { poster: 0, belopp_sek: 0, moms_sek: 0 },
     allvarliga_fel: 0,
