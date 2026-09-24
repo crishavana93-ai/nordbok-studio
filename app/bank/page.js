@@ -19,6 +19,8 @@ import { browserClient } from "@/lib/supabase";
 import { readActiveOwnerId } from "@/lib/owner-client";
 import { money, num, dateISO } from "@/lib/format";
 import { reportErrorAsync } from "@/lib/report-error";
+import { isForwarder } from "@/lib/frakt";
+import FraktChecklist from "@/components/FraktChecklist";
 
 const LIMIT = 500;
 
@@ -292,6 +294,10 @@ export default function BankPage() {
                           ta bort kopplingen
                         </button>
                       </span>
+                    )}
+
+                    {Number(t.amount) < 0 && (isForwarder(t.description) || String(t.category || "").startsWith("frakt:")) && (
+                      <FraktChecklist tx={t} sb={sb} onSaved={load} />
                     )}
 
                     {!t.matched_receipt && !t.matched_invoice && (() => {

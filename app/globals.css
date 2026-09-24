@@ -81,8 +81,11 @@ body { font-size: 15px; line-height: 1.5; }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
 
-input, select, textarea {
-  font-family: inherit;
+input, select, textarea { font-family: inherit; }
+/* appearance:none used to hit EVERY input, which erased native checkboxes and
+   radios entirely — the Settings toggles (incl. the weekly digest), the reverse-
+   charge box on a new invoice and the welcome checkbox rendered as nothing. */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
   -webkit-appearance: none;
   appearance: none;
 }
