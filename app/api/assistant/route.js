@@ -66,9 +66,11 @@ the user hasn't asked about yet.
 
 # WHO YOU SERVE
 
-One legal entity — an enskild firma — running SEVERAL ventures:
-The Next Cigar (magazine + tobacco accessories, no tobacco sales) · Turquino Studios
-(web agency) · Skattenavigator (tax tool) · zamacharters · cruiseshuttlemiami · ifmba.
+One legal entity — an enskild firma (being renamed Turquino Studios; main SNI
+62.100 web development) — running SEVERAL ventures: Turquino Studios (web agency) ·
+The Next Cigar (editorial site + accessories shop, NO tobacco sales) · Skattenavigator
+(tax tool) · Zamá Charters (booking agent — commission income, does not own boats) ·
+cruiseshuttlemiami · ifmba.
 
 All of them file under a single org number, a single momsdeklaration and a single
 NE-bilaga — but the user needs to see each venture's performance separately. Always
@@ -118,6 +120,72 @@ omsättningsgräns, brytpunkt, milersättning): use the value supplied in the
 constants context, cite the source, and state the income year it applies to.
 If a value is not supplied, say you need to verify it rather than recalling one.
 
+# VERIFIKATIONER — the evidence rule (Bokföringslagen 5 kap.)
+
+Every affärshändelse needs a verifikation: date it was prepared, date of the event,
+what it concerns, amount, counterparty, and a reference to underlying documents.
+  • A bank screenshot or statement line proves MONEY MOVED. It does not prove WHAT
+    was bought. For a supplier payment the verifikation is the supplier's invoice or
+    receipt; the bank line is supporting evidence.
+  • What a payment was FOR is a fact about the world, never a choice. If the user
+    does not know what a payment was for, do not offer "options" for how to classify
+    it. Ask who requested the payment, for what, and what paperwork exists. Unknown
+    purpose + foreign payee + urgency = treat as possible fraud first (tell them to
+    contact their bank about a recall and verify the payee on an independently
+    found phone number), accounting second.
+  • An egen verifikation (self-made voucher) is acceptable only where the
+    counterparty cannot issue a document and the amount is modest (parking meter,
+    lost receipt with other proof). It is not a substitute for a supplier invoice
+    on a large B2B payment — Skatteverket can refuse the deduction.
+  • Archive for 7 years after the end of the financial year (BFL 7 kap. 2 §).
+    Digitised paper may be destroyed after scanning (since 2024-07-01).
+
+# PRIVATE vs BUSINESS MONEY
+
+An enskild firma is not a separate legal person, but its books are separate.
+  • Business cost paid from a private account → cost + eget insättning (2018).
+  • Private cost paid from the business account → eget uttag (2013), never a cost.
+  • Family transfers and loans IN are not revenue; say so when they appear.
+  • A cost is deductible only if it was incurred to earn or keep income in THIS
+    business (IL 16 kap. 1 §). Costs belonging to a foreign company the user also
+    runs (e.g. a US LLC) are never deductible here.
+
+# CROSS-BORDER (the user buys from EU and non-EU suppliers)
+
+  Services from an EU business (incl. freight/forwarding bought B2B) → ruta 21 + 30 + 48.
+  Services from outside the EU → ruta 22 + 30 + 48.
+  Goods bought from another EU country (VAT number on invoice, goods move) → ruta 20 + 30 + 48.
+  Goods imported from outside the EU → import VAT in ruta 50 + 60 + 48; customs duty
+  (tull) is a cost, never VAT.
+  Foreign VAT charged on an invoice (e.g. Spanish IVA) is NEVER deductible in the
+  Swedish return. Tell the user to ask for a corrected invoice with their VAT number,
+  or to reclaim it via Skatteverket's EU refund e-service (deadline 30 September of
+  the following year).
+  Goods bought for resale are INVENTORY (varulager). They become a cost when sold;
+  unsold stock at year-end is valued (lowest of cost and net realisable value; the
+  97 % schablon may apply) — never expense a stock purchase in full on payment day.
+  Excise goods (tobacco, alcohol) need Skatteverket approval BEFORE commercial import.
+  This firma's registered activity explicitly excludes tobacco sales — flag any
+  tobacco-related purchase immediately.
+
+# FISCAL YEAR AND YEAR-END
+
+Enskild firma = calendar year. Bokslutsmetoden (kontantmetoden) during the year,
+BUT at year-end (bokslut) unpaid customer invoices and unpaid supplier invoices
+must be booked in the year they belong to. Income tax is paid on the överskott
+(revenue − deductible costs) via NE-bilagan in the inkomstdeklaration the following
+spring. An underskott is carried forward to later years. Preliminary F-skatt is
+paid monthly; if the year runs much better or worse than estimated, tell the user
+to file a ny preliminär inkomstdeklaration so they are not hit with kostnadsränta
+or an overpayment.
+
+# LARGE AND FOREIGN PAYMENTS
+
+The user has previously been declined by banks during AML screening. For any
+outgoing foreign payment above ~10 000 kr, remind them to keep: the supplier
+invoice, the contract/order, the transport documents, and a one-line business
+purpose. That file answers a bank's "source and purpose" question in minutes.
+
 # HARD CONSTRAINTS
 
 1. NEVER invent a rule, an SKV document number, a percentage or a threshold. If you
@@ -132,6 +200,16 @@ If a value is not supplied, say you need to verify it rather than recalling one.
    and offer the legitimate version.
 
 # HOW TO ANSWER
+
+Structure for any accounting or tax question:
+  1. Svar — the answer or the number, one or two sentences.
+  2. Varför — the rule, with its source (lagrum or Skatteverket page).
+  3. Underlag — exactly which documents the user must have.
+  4. Bokföring — the entry (BAS accounts, debet/kredit, moms-rutor) when relevant.
+  5. Nästa steg — one concrete action, with a date if a deadline applies.
+If a fact that decides the answer is missing (what was bought, from which country,
+goods or service, private or business), ASK for it instead of answering every branch.
+Flag uncertainty explicitly rather than guessing.
 
 Lead with the number or the answer. Reasoning after, not before.
 Use a table when comparing periods, rates or scenarios. Prose otherwise.
@@ -173,22 +251,26 @@ export async function POST(req) {
     /* ── Snapshot + history in one round trip (RLS keeps us in this user's rows) ── */
     const [
       { data: settings }, { data: invoices }, { data: receipts },
-      { data: trips }, { data: tasks }, { data: clients }, { data: history },
+      { data: trips }, { data: tasks }, { data: clients }, { data: bankTx }, { data: history },
     ] = await Promise.all([
       sb.from("studio_settings").select("*").eq("user_id", user.id).maybeSingle(),
       sb.from("studio_invoices")
-        .select("invoice_number, status, total, vat_amount, subtotal, currency, issue_date, due_date, paid_at, venture, studio_clients(name)")
+        .select("invoice_number, status, total, vat_amount, subtotal, currency, issue_date, due_date, paid_at, venture, studio_clients(name)").eq("user_id", user.id)
         .gte("issue_date", yearStart).order("issue_date", { ascending: false }).limit(60),
       sb.from("studio_receipts")
-        .select("vendor, total, vat_amount, currency, category, bas_account, ne_row, receipt_date, is_business, is_deductible, vat_treatment, venture")
+        .select("vendor, total, vat_amount, currency, category, bas_account, ne_row, receipt_date, is_business, is_deductible, vat_treatment, venture").eq("user_id", user.id)
         .gte("receipt_date", yearStart).order("receipt_date", { ascending: false }).limit(120),
       sb.from("studio_trips")
-        .select("trip_date, from_address, to_address, purpose, km, deduction, is_business")
+        .select("trip_date, from_address, to_address, purpose, km, deduction, is_business").eq("user_id", user.id)
         .gte("trip_date", yearStart).order("trip_date", { ascending: false }).limit(60),
       sb.from("studio_tasks")
-        .select("title, due_at, status, priority, category")
+        .select("title, due_at, status, priority, category").eq("user_id", user.id)
         .eq("status", "open").order("due_at").limit(20),
-      sb.from("studio_clients").select("name, email").eq("archived", false).limit(40),
+      sb.from("studio_clients").select("name, email").eq("user_id", user.id).eq("archived", false).limit(40),
+      sb.from("studio_bank_tx")
+        .select("tx_date, description, amount, currency, matched_receipt, matched_invoice")
+        .eq("user_id", user.id).gte("tx_date", yearStart)
+        .order("tx_date", { ascending: false }).limit(300),
       sb.from("studio_assistant_log")
         .select("role, content, created_at")
         .eq("thread_id", tid).order("created_at", { ascending: false }).limit(HISTORY_TURNS),
@@ -214,6 +296,11 @@ export async function POST(req) {
     const spentInQuarter = rec.filter((r) => r.receipt_date >= q.start && r.receipt_date <= q.end);
     const nonSekRows = [...inv, ...rec].filter((r) => r.currency && r.currency !== "SEK").length;
     const untagged = [...inv, ...rec].filter((r) => !r.venture).length;
+    /* Money that left the account with no receipt or invoice behind it. The biggest
+       first: that is where a missing verifikation costs the most. */
+    const unmatchedOut = (bankTx || [])
+      .filter((t) => Number(t.amount) < 0 && !t.matched_receipt && !t.matched_invoice)
+      .sort((a, b) => Number(a.amount) - Number(b.amount));
 
     /* ── Live half of the system prompt: changes every call, not cached ── */
     const live = `# LIVE DATA — as of ${now.toISOString().slice(0, 10)}
@@ -238,6 +325,9 @@ ${inv.slice(0, 12).map((i) => `${i.invoice_number} ${i.studio_clients?.name || "
 
 — KVITTON (senaste 10 av ${rec.length}) —
 ${rec.slice(0, 10).map((r) => `${r.receipt_date} ${r.vendor} ${r.total} ${r.currency || "SEK"} (${r.category || "?"}/${r.bas_account || "?"})${r.vat_treatment ? ` {${r.vat_treatment}}` : ""}${r.venture ? ` [${r.venture}]` : ""}`).join("\n") || "(inga)"}
+
+— BANK: UTBETALNINGAR UTAN UNDERLAG (${unmatchedOut.length} st i år, största 10) —
+${unmatchedOut.slice(0, 10).map((t) => `${t.tx_date} ${t.description} ${t.amount} ${t.currency || "SEK"}`).join("\n") || "(inga — eller inget kontoutdrag importerat)"}
 
 — RESOR (senaste 8) —
 ${(trips || []).slice(0, 8).map((t) => `${t.trip_date} ${t.from_address}→${t.to_address} (${t.purpose}) ${t.km} km`).join("\n") || "(inga)"}

@@ -25,6 +25,7 @@ import { serverClient } from "@/lib/supabase-server";
 import { getOwnerContext } from "@/lib/access";
 import OwnerSwitcher from "@/components/nav/OwnerSwitcher";
 import AppBar from "@/components/nav/AppBar";
+import SectionTabs from "@/components/nav/SectionTabs";
 import Splash from "@/components/Splash";
 
 export const viewport = {
@@ -84,6 +85,7 @@ export default async function RootLayout({ children }) {
             <main className="app-main">
               <AppBar businessName={businessName} />
               <OwnerSwitcher owners={ownerCtx?.owners || []} activeId={ownerCtx?.activeId} />
+              <SectionTabs />
               {children}
             </main>
             <div className="contents rail:hidden">

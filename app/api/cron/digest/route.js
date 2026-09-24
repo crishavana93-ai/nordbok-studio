@@ -46,17 +46,18 @@ export async function runDigest({ singleUser = null, force = false } = {}) {
     if (!email) { skipped.push({ user: p.user_id, reason: "no email" }); continue; }
 
     const yearStart = `${today.getFullYear()}-01-01`;
-    const [{ data: settings }, { data: invoices }, { data: receipts }, { data: trips }, { data: tasks }] = await Promise.all([
+    const [{ data: settings }, { data: invoices }, { data: receipts }, { data: trips }, { data: tasks }, { data: bankTx }] = await Promise.all([
       sb.from("studio_settings").select("*").eq("user_id", p.user_id).maybeSingle(),
       sb.from("studio_invoices").select("invoice_number,status,total,vat_amount,subtotal,issue_date,due_date,paid_at,studio_clients(name)").eq("user_id", p.user_id).gte("issue_date", yearStart),
       sb.from("studio_receipts").select("total,vat_amount,receipt_date,is_business,is_deductible,status").eq("user_id", p.user_id).gte("receipt_date", yearStart),
       sb.from("studio_trips").select("km,deduction,trip_date,is_business").eq("user_id", p.user_id).gte("trip_date", yearStart),
       sb.from("studio_tasks").select("title,due_at,status,priority").eq("user_id", p.user_id).eq("status", "open"),
+      sb.from("studio_bank_tx").select("tx_date,description,amount,currency,matched_receipt,matched_invoice,imported_at").eq("user_id", p.user_id).gte("tx_date", yearStart),
     ]);
 
     const { subject, html, summary } = buildDigest({
       user: { email },
-      settings, invoices: invoices || [], receipts: receipts || [], trips: trips || [], tasks: tasks || [],
+      settings, invoices: invoices || [], receipts: receipts || [], trips: trips || [], tasks: tasks || [], bankTx: bankTx || [],
     });
 
     const fromEmail = process.env.RESEND_FROM_EMAIL || "Studio <onboarding@resend.dev>";
