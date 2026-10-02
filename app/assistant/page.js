@@ -1,7 +1,8 @@
 "use client";
 import { postJson } from "@/lib/safe-json";
 import { reportErrorAsync } from "@/lib/report-error";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 
 const SUGGESTIONS = [
   "Vad är min beräknade vinst hittills i år?",
@@ -12,7 +13,7 @@ const SUGGESTIONS = [
   "Sammanfatta mina avdrag (BAS-konto för BAS-konto).",
 ];
 
-export default function AssistantPage() {
+function AssistantPageInner() {
   const [thread, setThread] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
@@ -21,6 +22,16 @@ export default function AssistantPage() {
   const endRef = useRef(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+
+  /* Hem sends a question in the URL. Ask it once, then forget it so a reload
+     does not ask again. */
+  const params = useSearchParams();
+  const asked = useRef(false);
+  useEffect(() => {
+    const q = params?.get("q");
+    if (q && !asked.current) { asked.current = true; send(q); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   async function send(message) {
     if (!message.trim()) return;
@@ -135,4 +146,9 @@ export default function AssistantPage() {
       </p>
     </div>
   );
+}
+
+
+export default function AssistantPage() {
+  return <Suspense fallback={null}><AssistantPageInner /></Suspense>;
 }

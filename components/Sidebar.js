@@ -30,7 +30,7 @@ export default function Sidebar({ email }) {
 
   return (
     <aside className="sidebar">
-      <Link href="/dashboard" className="brand">
+      <Link href="/hem" className="brand">
         <span className="brand-dot">N</span>
         <span>Nordbok Studio</span>
       </Link>

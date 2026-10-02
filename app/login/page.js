@@ -16,7 +16,7 @@ export default function LoginPage() {
   // If we land here already signed in (e.g. layout missed it), bounce.
   useEffect(() => {
     const sb = browserClient();
-    sb.auth.getUser().then(({ data }) => { if (data.user) router.replace(params.get("next") || "/dashboard"); });
+    sb.auth.getUser().then(({ data }) => { if (data.user) router.replace(params.get("next") || "/hem"); });
   }, [router, params]);
 
   async function submit(e) {
@@ -40,7 +40,7 @@ export default function LoginPage() {
       } else {
         const { error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.replace(params.get("next") || "/dashboard");
+        router.replace(params.get("next") || "/hem");
         router.refresh();
       }
     } catch (e) {

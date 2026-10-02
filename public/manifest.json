@@ -3,7 +3,7 @@
   "name": "Nordbok Studio",
   "short_name": "Nordbok",
   "description": "Daglig bokföring för enskild firma — fakturor, kvitton, körjournal, deadlines.",
-  "start_url": "/dashboard?source=pwa",
+  "start_url": "/hem?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],

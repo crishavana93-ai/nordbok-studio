@@ -209,7 +209,7 @@ export default function BankPage() {
     <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-[21px] font-medium tracking-[-0.015em]">Transaktioner</h1>
+          <h1 className="text-[21px] font-medium tracking-[-0.015em]">Pengar</h1>
           <p className="mt-1 text-[13px] text-ink-2">
             {txs === null ? "Laddar…" : rows.length === 0 ? "Inga transaktioner ännu" : `${num(rows.length)} transaktioner`}
           </p>

@@ -91,6 +91,11 @@ export default function ReceiptsPage() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  /* Hem drops a receipt here through sessionStorage (a File cannot ride in a URL).
+     Open the capture panel so ReceiptCapture can pick it up. */
+  useEffect(() => {
+    try { if (sessionStorage.getItem("nordbok_pending_receipt")) setOpen(true); } catch {}
+  }, []);
   const [expanded, setExpanded] = useState(null);
   /* Vilket kvitto som rättas just nu. Ett i taget — två öppna formulär mot samma
      tabell är ett sätt att skriva över sin egen ändring utan att märka det. */

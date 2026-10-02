@@ -144,6 +144,21 @@ export default function ReceiptCapture({ onSaved }) {
 
   /* En gemensam ingång för filväljaren, släppet och inklistringen. Den enda
      skillnaden mellan dem är hur filen kom hit. */
+  /* A receipt handed over from Hem. Rebuild the File from the data URL and run
+     it through the same path as a drop, then clear the handover so a reload
+     does not upload it twice. */
+  useEffect(() => {
+    let raw = null;
+    try { raw = sessionStorage.getItem("nordbok_pending_receipt"); sessionStorage.removeItem("nordbok_pending_receipt"); } catch {}
+    if (!raw) return;
+    try {
+      const { name, type, data } = JSON.parse(raw);
+      const bytes = Uint8Array.from(atob(String(data).split(",")[1] || ""), (c) => c.charCodeAt(0));
+      taEmot(new File([bytes], name || "kvitto", { type: type || "image/jpeg" }));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function taEmot(fil) {
     if (!fil) return;
     if (!OK_MIME.has(fil.type)) {
