@@ -40,6 +40,8 @@ function Field({ label, wide, children }) {
   );
 }
 
+const t_ = (x) => x;
+
 /* Whole calendar days between today and the due date, in Stockholm. */
 function daysUntil(dueAt) {
   const todayISO = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
@@ -53,6 +55,7 @@ export default function DeadlinesPage() {
   const sb = useMemo(() => browserClient(), []);
   const [list, setList] = useState(null);
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
 
@@ -98,9 +101,20 @@ export default function DeadlinesPage() {
       .select("vat_registered_from, vat_dereg_from, vat_period_type, vat_eu_trade, vat_large_turnover")
       .eq("user_id", user.id)
       .maybeSingle();
-    await withErrors(
-      () => sb.from("studio_tasks").insert(buildTaxYearDeadlines(new Date().getFullYear(), user.id, settings)),
-      "ui/deadlines-seed");
+    /* Idempotent: a row the user already has (same title, same day, any status)
+       is never inserted twice, so the button can be pressed every time the map
+       in lib/seed-deadlines.js grows. In Q4 next year's rows go in too. */
+    const year = new Date().getFullYear();
+    const years = new Date().getMonth() >= 9 ? [year, year + 1] : [year];
+    const wanted = years.flatMap((y) => buildTaxYearDeadlines(y, user.id, settings));
+    const { data: have } = await sb.from("studio_tasks").select("title, due_at")
+      .eq("user_id", user.id).eq("source", "system");
+    const key = (t) => `${t.title}|${String(t.due_at).slice(0, 10)}`;
+    const seen = new Set((have || []).map(key));
+    const fresh = wanted.filter((t) => !seen.has(key(t)));
+    if (!fresh.length) { setErr(""); setInfo("Alla Skatteverkets datum finns redan."); return; }
+    const ok = await withErrors(() => sb.from("studio_tasks").insert(fresh), "ui/deadlines-seed");
+    if (ok) setInfo(`${fresh.length} nya datum inlagda.`);
   };
 
   const markDone = (id) => withErrors(
@@ -148,13 +162,22 @@ export default function DeadlinesPage() {
           </p>
         </div>
         {!adding && (
+          <div className="flex shrink-0 gap-2">
+          <button onClick={seed} disabled={busy}
+            className="rounded-[var(--radius-ctl)] border border-border-firm px-3.5 py-2.5 text-[13px] font-medium text-ink-2 hover:text-ink disabled:opacity-40">
+            Skatteverkets datum
+          </button>
           <button onClick={() => setAdding(true)}
             className="shrink-0 rounded-[var(--radius-ctl)] border border-border-firm px-3.5 py-2.5 text-[13px] font-medium text-ink-2 hover:text-ink">
             Lägg till
           </button>
+          </div>
         )}
       </div>
 
+      {info && (
+        <p role="status" className="rounded-[var(--radius-card)] border border-good/35 bg-good-bg px-4 py-3 text-[13px] leading-relaxed text-ink-2">{info}</p>
+      )}
       {err && (
         <p role="alert" className="rounded-[var(--radius-card)] border border-crit/35 bg-crit-bg px-4 py-3 text-[13px] leading-relaxed text-ink-2">{err}</p>
       )}
@@ -198,8 +221,9 @@ export default function DeadlinesPage() {
           <div className="py-10 text-center">
             <p className="text-[14px] text-ink-2">Inga öppna deadlines.</p>
             <p className="mx-auto mt-1.5 max-w-[44ch] text-[13px] leading-relaxed text-ink-3">
-              Lägg in årets datum hos Skatteverket — momsdeklarationerna, NE-bilagan och
-              F-skatten månad för månad.
+              Lägg in hela året: moms, F-skatt varje månad, fyllnadsinbetalning, NE-bilagan,
+              slutskatten, ny preliminär deklaration och bokslutet — med vad som krävs och vad det
+              kostar att missa.
             </p>
             <button onClick={seed} disabled={busy}
               className="mt-4 rounded-[var(--radius-ctl)] bg-brand px-4 py-2.5 text-[14px] font-semibold text-brand-ink disabled:opacity-40">
@@ -208,6 +232,20 @@ export default function DeadlinesPage() {
           </div>
         </section>
       )}
+
+      {rows.length > 0 && (() => {
+        const next = rows.find((t) => daysUntil(t.due_at) >= 0);
+        return next ? (
+          <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 sm:p-7">
+            <span className="micro-label">Nästa</span>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3">
+              <span className="text-[26px] font-medium tracking-[-0.02em] text-ink">{t_(next.title)}</span>
+            </div>
+            <p className="mt-1 text-[14.5px] text-ink-2">{daysPhrase(daysUntil(next.due_at))} · {dateISO(next.due_at)}</p>
+            {next.description && <p className="mt-3 max-w-[64ch] text-[13px] leading-relaxed text-ink-2">{next.description}</p>}
+          </section>
+        ) : null;
+      })()}
 
       {rows.length > 0 && (
         <section className="rounded-[var(--radius-card)] border border-border bg-surface p-4 sm:p-5">

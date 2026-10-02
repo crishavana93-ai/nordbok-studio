@@ -68,12 +68,15 @@ function Seg({ items, value, onChange, size = "md", label }) {
   );
 }
 
-function Tile({ label, value, note, attn }) {
+function Bucket({ label, value, note, attn, tone, badge }) {
   const m = money(value, { decimals: 0 });
   return (
-    <div className="flex min-h-[108px] flex-col gap-1.5 rounded-[var(--radius-card)] border border-border bg-surface p-4">
-      <span className="micro-label">{label}</span>
-      <span className="tnum text-[25px] font-medium tracking-[-0.02em]" lang="sv-SE" aria-hidden="true">
+    <div className="flex h-full min-h-[108px] w-full flex-col gap-1.5 rounded-[var(--radius-card)] border border-border bg-surface p-4 transition-colors hover:border-border-firm">
+      <span className="flex items-center gap-2">
+        <span className="micro-label">{label}</span>
+        {badge && <span className="rounded bg-crit-bg px-1.5 py-0.5 font-mono text-[9.5px] font-medium uppercase tracking-[0.1em] text-crit">{badge}</span>}
+      </span>
+      <span className={`tnum text-[25px] font-medium tracking-[-0.02em] ${tone === "good" ? "text-good" : "text-ink"}`} lang="sv-SE" aria-hidden="true">
         <NumberFlow value={value} locales="sv-SE" format={{ maximumFractionDigits: 0 }} suffix=" kr" />
       </span>
       <span className="sr-only">{m.spoken}</span>
@@ -98,8 +101,7 @@ export default function DashboardClient({ data, ventures }) {
   const q = data.quarter;
   const r49 = data.moms.rutor.r49;
   const refund = r49 < 0;
-  const urgency = q.daysLeft <= 3 ? "crit" : q.daysLeft <= 14 ? "warn" : "good";
-  const heroSpoken = money(Math.abs(Math.round(r49)), { decimals: 0 }).spoken;
+  const kvar = data.kvar;
 
   return (
     <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-3">
@@ -120,64 +122,68 @@ export default function DashboardClient({ data, ventures }) {
         )}
       </div>
 
-      {/* HERO — tap to open the box-by-box breakdown */}
-      <MomsSheet open={sheet} onOpenChange={setSheet} moms={data.moms} quarter={q}>
-        <button
-          className="w-full rounded-[var(--radius-card)] border border-border bg-surface p-5 text-left
-                     transition-colors hover:border-border-firm sm:p-7"
-        >
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="micro-label">Moms · {q.label}</span>
-            {!data.moms.fileReady && (
-              <span className="rounded bg-crit-bg px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-crit">
-                Åtgärda
-              </span>
-            )}
-          </div>
+      {/* HERO — what you keep. Överskott so far this year minus the tax it will
+          attract. Hnry's and Kontist's posture: the one number a sole trader
+          actually needs, with the three claims on the money underneath it. */}
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 sm:p-7">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="micro-label">Kvar efter skatt · {data.year} hittills</span>
+        </div>
+        <div className={`flex flex-wrap items-baseline ${kvar < 0 ? "text-crit" : "text-ink"}`}>
+          <span className="hero-figure" lang="sv-SE" aria-hidden="true">
+            <NumberFlow value={Math.round(kvar)} locales="sv-SE" format={{ maximumFractionDigits: 0 }} />
+          </span>
+          <span className="hero-unit">kr</span>
+          <span className="sr-only">{money(Math.round(kvar), { decimals: 0 }).spoken}</span>
+        </div>
+        <p className="mt-2 text-[14.5px] text-ink-2">
+          {data.resultat.overskott > 0
+            ? `av ${money(data.resultat.overskott, { decimals: 0 }).text} i överskott · skatten är ett tak, jobbskatteavdraget är inte medräknat`
+            : data.resultat.intakter > 0
+              ? "kostnaderna är större än det som betalats in i år"
+              : "ingen faktura betald ännu i år"}
+        </p>
+        <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3 border-t border-border pt-4">
+          <Meta label="Betalt in">{money(data.resultat.intakter, { decimals: 0 }).text}</Meta>
+          <Meta label="Kostnader">{money(data.resultat.kostnader, { decimals: 0 }).text}</Meta>
+          <Meta label="Metod">Kontantmetoden</Meta>
+          {data.resultat.oraknade > 0 && (
+            <Meta label="Ej omräknat"><span className="text-warn">{num(data.resultat.oraknade)} poster</span></Meta>
+          )}
+        </div>
+      </section>
 
-          <div className={`flex flex-wrap items-baseline ${refund ? "text-good" : "text-ink"}`}>
-            <span className="hero-figure" lang="sv-SE" aria-hidden="true">
-              <NumberFlow value={Math.abs(Math.round(r49))} locales="sv-SE" format={{ maximumFractionDigits: 0 }} />
-            </span>
-            <span className="hero-unit">kr</span>
-            <span className="sr-only">{heroSpoken}</span>
-          </div>
-          <p className="mt-2 text-[14.5px] text-ink-2">
-            {refund ? "att få tillbaka" : "att betala"} · tryck för ruta för ruta
-          </p>
-
-          <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3 border-t border-border pt-4">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px] font-medium
-              ${urgency === "crit" ? "bg-crit-bg text-crit" : urgency === "warn" ? "bg-warn-bg text-warn" : "bg-good-bg text-good"}`}>
-              <span className="size-1.5 rounded-full bg-current" />
-              {daysPhrase(q.daysLeft)}
-            </span>
-            <Meta label="Period">{dateISO(q.start)} – {dateISO(q.end)}</Meta>
-            <Meta label="Senast">{dateISO(q.deadline)}</Meta>
-            <Meta label="Metod">Kontantmetoden</Meta>
-          </div>
-        </button>
-      </MomsSheet>
-
-      {/* THREE TILES. Not four. */}
+      {/* THREE BUCKETS. The claims on the money, each bound to its evidence:
+          moms opens ruta för ruta, skatt opens Finans, fakturor opens the list. */}
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-        <Tile
-          label={`Intäkter ${data.year}`} value={totals.revenue}
-          attn={totals.revenue === 0}
-          note={totals.revenue === 0 ? "Ingen faktura betald ännu" : "Betalt, kontantmetoden"}
-        />
-        <Tile
-          label={`Kostnader ${data.year}`} value={totals.costs}
-          attn={data.flags.needsConversion > 0}
-          note={data.flags.needsConversion > 0
-            ? `${num(data.flags.needsConversion)} poster väntar på omräkning`
-            : "Alla poster omräknade"}
-        />
-        <Tile
-          label="Obetalda fakturor" value={data.tiles.unpaid}
-          attn={data.tiles.overdue > 0}
-          note={data.tiles.overdue > 0 ? `${num(data.tiles.overdue)} förfallna` : "Inga utestående"}
-        />
+        <MomsSheet open={sheet} onOpenChange={setSheet} moms={data.moms} quarter={q}>
+          <button className="h-full w-full text-left">
+            <Bucket
+              label={`Moms · ${q.label}`}
+              value={Math.abs(Math.round(r49))}
+              tone={refund ? "good" : undefined}
+              badge={!data.moms.fileReady ? "Åtgärda" : null}
+              note={`${refund ? "att få tillbaka" : "att betala"} · senast ${dateISO(q.deadline)} · ${daysPhrase(q.daysLeft)}`}
+            />
+          </button>
+        </MomsSheet>
+        <Link href="/finansiering" className="no-underline">
+          <Bucket
+            label="Skatt att sätta av"
+            value={data.skatt.total}
+            note={data.skatt.total > 0
+              ? `egenavgifter ${money(data.skatt.egenavgifter, { decimals: 0 }).text} · inkomstskatt ${money(data.skatt.kommunal + data.skatt.statlig, { decimals: 0 }).text}`
+              : "inget överskott att beskatta ännu"}
+          />
+        </Link>
+        <Link href="/invoices" className="no-underline">
+          <Bucket
+            label="Obetalda fakturor"
+            value={data.tiles.unpaid}
+            attn={data.tiles.overdue > 0}
+            note={data.tiles.overdue > 0 ? `${num(data.tiles.overdue)} förfallna` : "Inga utestående"}
+          />
+        </Link>
       </div>
 
       {/* ONE CHART */}
